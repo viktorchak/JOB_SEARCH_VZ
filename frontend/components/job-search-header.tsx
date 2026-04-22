@@ -14,6 +14,8 @@ interface JobSearchHeaderProps {
   q: string;
   googleConfigured: boolean;
   googleAuthenticated: boolean;
+  googleEmail: string | null;
+  profileIsDefault: boolean;
   refreshing: boolean;
   connectors: ConnectorStatus[];
   onQueryChange: (value: string) => void;
@@ -27,6 +29,8 @@ export function JobSearchHeader({
   q,
   googleConfigured,
   googleAuthenticated,
+  googleEmail,
+  profileIsDefault,
   refreshing,
   connectors,
   onQueryChange,
@@ -36,7 +40,9 @@ export function JobSearchHeader({
   formatDateTime,
 }: JobSearchHeaderProps) {
   const googleLabel = googleAuthenticated
-    ? "Google connected"
+    ? googleEmail
+      ? `Google: ${googleEmail}`
+      : "Google connected"
     : googleConfigured
       ? "Authenticate Google"
       : "Google setup needed";
@@ -61,6 +67,11 @@ export function JobSearchHeader({
             <p className="font-ui mt-3 max-w-3xl text-sm leading-7 text-slate-600 md:text-base">
               Search live jobs across broad families, rank them to your saved profile, and take action
               from one workspace.
+            </p>
+            <p className="font-ui mt-2 max-w-3xl text-sm leading-7 text-slate-500">
+              {profileIsDefault
+                ? "First run: save your profile before treating the ranking as personalized."
+                : "Ranking is currently personalized to your saved profile."}
             </p>
           </div>
         </div>

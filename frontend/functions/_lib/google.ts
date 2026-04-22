@@ -51,14 +51,18 @@ async function refreshAccessToken(env: CloudflareEnv) {
     token_type?: string;
     scope?: string;
   };
+  const refreshedAccessToken = payload.access_token ?? existing.access_token ?? null;
+  const emailFrom =
+    existing.email_from ??
+    (refreshedAccessToken ? await fetchAuthenticatedEmail(env, refreshedAccessToken) : null);
 
   const updated = await saveGoogleToken(env, {
-    access_token: payload.access_token ?? existing.access_token,
+    access_token: refreshedAccessToken,
     refresh_token: existing.refresh_token,
     token_type: payload.token_type ?? existing.token_type,
     scope: payload.scope ?? existing.scope,
     expiry_date: payload.expires_in ? new Date(Date.now() + payload.expires_in * 1000).toISOString() : existing.expiry_date,
-    email_from: existing.email_from,
+    email_from: emailFrom,
   });
 
   if (!updated.access_token) {
@@ -100,6 +104,21 @@ async function googleJsonRequest<T>(
   return (await response.json()) as T;
 }
 
+async function fetchAuthenticatedEmail(env: CloudflareEnv, accessToken: string): Promise<string | null> {
+  try {
+    const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+    if (!response.ok) return null;
+    const payload = (await response.json()) as { emailAddress?: string };
+    return payload.emailAddress ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function fiveBusinessDaysOut(): Date {
   const current = new Date();
   current.setHours(9, 30, 0, 0);
@@ -114,14 +133,19 @@ function fiveBusinessDaysOut(): Date {
   return current;
 }
 
-export async function googleAuthStatus(env: CloudflareEnv): Promise<{ configured: boolean; authenticated: boolean; token_path: string | null }> {
+export async function googleAuthStatus(env: CloudflareEnv): Promise<{ configured: boolean; authenticated: boolean; token_path: string | null; email_from: string | null }> {
   const configured = Boolean(getOptionalEnv(env, "GOOGLE_CLIENT_ID") && getOptionalEnv(env, "GOOGLE_CLIENT_SECRET", "GOOGLE_CLIENT_Secret"));
   if (!configured) {
-    return { configured: false, authenticated: false, token_path: null };
+    return { configured: false, authenticated: false, token_path: null, email_from: null };
   }
   const token = await getGoogleToken(env);
   const authenticated = Boolean(token && (isTokenValid(token.expiry_date) || token.refresh_token));
-  return { configured: true, authenticated, token_path: null };
+  return {
+    configured: true,
+    authenticated,
+    token_path: null,
+    email_from: token?.email_from ?? null,
+  };
 }
 
 export async function buildGoogleAuthorizationUrl(env: CloudflareEnv, request: Request): Promise<string> {
@@ -182,13 +206,14 @@ export async function exchangeGoogleCode(
     token_type?: string;
     scope?: string;
   };
+  const emailFrom = payload.access_token ? await fetchAuthenticatedEmail(env, payload.access_token) : null;
   await saveGoogleToken(env, {
     access_token: payload.access_token ?? null,
     refresh_token: payload.refresh_token ?? null,
     token_type: payload.token_type ?? null,
     scope: payload.scope ?? null,
     expiry_date: payload.expires_in ? new Date(Date.now() + payload.expires_in * 1000).toISOString() : null,
-    email_from: getOptionalEnv(env, "EMAIL_FROM") ?? null,
+    email_from: emailFrom ?? getOptionalEnv(env, "EMAIL_FROM") ?? null,
   });
 }
 
@@ -196,7 +221,7 @@ export async function sendGoogleEmail(
   env: CloudflareEnv,
   payload: { to_email: string; subject: string; body: string },
 ): Promise<{ id?: string | null }> {
-  const from = getOptionalEnv(env, "EMAIL_FROM");
+  const from = (await getGoogleToken(env))?.email_from ?? getOptionalEnv(env, "EMAIL_FROM");
   const lines = [
     `To: ${payload.to_email}`,
     ...(from ? [`From: ${from}`] : []),

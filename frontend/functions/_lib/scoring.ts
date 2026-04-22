@@ -1,16 +1,19 @@
 import { getOptionalEnv } from "./env";
 import type { CloudflareEnv } from "./types";
 import {
+  batchUpsertJobAttributes,
+  batchUpsertScores,
   ensureActiveProfile,
   getJobAttributes,
   getScore,
+  listAllJobAttributes,
   listAllJobs,
-  listJobsMissingAttributes,
-  listUnscoredJobs,
+  listAllScores,
   saveJobAttributes,
   saveScore,
   type JobAttributeRecord,
   type JobRecord,
+  type ScoreRecord,
   type ScorePayload,
   type UserProfileRecord,
 } from "./supabase";
@@ -507,8 +510,72 @@ function rubricVersion(env: CloudflareEnv): string {
   return getOptionalEnv(env, "RUBRIC_VERSION") ?? "v1";
 }
 
+function shouldWriteScore(existing: ScoreRecord | null | undefined, version: string, payload: ScorePayload): boolean {
+  return !existing || existing.rubric_version !== version || scoreChanged(existing, payload);
+}
+
+function buildScoreRecord(jobId: string, version: string, payload: ScorePayload, existingId?: string): ScoreRecord {
+  return {
+    id: existingId ?? crypto.randomUUID(),
+    job_id: jobId,
+    rubric_version: version,
+    ...payload,
+    scored_at: nowIso(),
+  };
+}
+
+async function batchScoreJobs(
+  env: CloudflareEnv,
+  jobs: JobRecord[],
+  profile: UserProfileRecord,
+): Promise<{ processed: number; skipped: number; failed: number }> {
+  const version = rubricVersion(env);
+  const attributesByJobId = new Map((await listAllJobAttributes(env)).map((attributes) => [attributes.job_id, attributes]));
+  const scoresByJobId = new Map((await listAllScores(env)).map((score) => [score.job_id, score]));
+  const attributeUpserts: JobAttributeRecord[] = [];
+  const scoreUpserts: ScoreRecord[] = [];
+
+  let processed = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const job of jobs) {
+    try {
+      let attributes = attributesByJobId.get(job.id);
+      if (!attributes) {
+        attributes = extractJobAttributes(job);
+        attributesByJobId.set(job.id, attributes);
+        attributeUpserts.push(attributes);
+      }
+
+      const payload = scoreJob(profile, attributes);
+      const existing = scoresByJobId.get(job.id);
+      if (shouldWriteScore(existing, version, payload)) {
+        const nextScore = buildScoreRecord(job.id, version, payload, existing?.id);
+        scoresByJobId.set(job.id, nextScore);
+        scoreUpserts.push(nextScore);
+        processed += 1;
+      } else {
+        skipped += 1;
+      }
+    } catch {
+      failed += 1;
+    }
+  }
+
+  if (attributeUpserts.length) {
+    await batchUpsertJobAttributes(env, attributeUpserts);
+  }
+  if (scoreUpserts.length) {
+    await batchUpsertScores(env, scoreUpserts);
+  }
+
+  return { processed, skipped, failed };
+}
+
 export async function ensureJobScored(env: CloudflareEnv, job: JobRecord, profile?: UserProfileRecord): Promise<ScorePayload> {
   const activeProfile = profile ?? (await ensureActiveProfile(env));
+  const version = rubricVersion(env);
   let attributes = await getJobAttributes(env, job.id);
   if (!attributes) {
     attributes = extractJobAttributes(job);
@@ -516,45 +583,23 @@ export async function ensureJobScored(env: CloudflareEnv, job: JobRecord, profil
   }
   const payload = scoreJob(activeProfile, attributes);
   const existing = await getScore(env, job.id);
-  if (!existing || scoreChanged(existing, payload)) {
-    await saveScore(env, job.id, rubricVersion(env), payload);
+  if (shouldWriteScore(existing, version, payload)) {
+    await saveScore(env, job.id, version, payload);
   }
   return payload;
 }
 
 export async function scoreUnscoredJobs(env: CloudflareEnv): Promise<{ processed: number; skipped: number; failed: number }> {
   const profile = await ensureActiveProfile(env);
-  const jobsById = new Map<string, JobRecord>();
-  for (const job of await listUnscoredJobs(env)) jobsById.set(job.id, job);
-  for (const job of await listJobsMissingAttributes(env)) jobsById.set(job.id, job);
-
-  let processed = 0;
-  let failed = 0;
-  for (const job of jobsById.values()) {
-    try {
-      await ensureJobScored(env, job, profile);
-      processed += 1;
-    } catch {
-      failed += 1;
-    }
-  }
-  return { processed, skipped: 0, failed };
+  const attributesByJobId = new Set((await listAllJobAttributes(env)).map((attributes) => attributes.job_id));
+  const scoresByJobId = new Set((await listAllScores(env)).map((score) => score.job_id));
+  const jobs = (await listAllJobs(env)).filter((job) => !attributesByJobId.has(job.id) || !scoresByJobId.has(job.id));
+  return batchScoreJobs(env, jobs, profile);
 }
 
 export async function rescoreActiveProfile(env: CloudflareEnv): Promise<{ processed: number; skipped: number; failed: number }> {
   const profile = await ensureActiveProfile(env);
-  const jobs = await listAllJobs(env);
-  let processed = 0;
-  let failed = 0;
-  for (const job of jobs) {
-    try {
-      await ensureJobScored(env, job, profile);
-      processed += 1;
-    } catch {
-      failed += 1;
-    }
-  }
-  return { processed, skipped: 0, failed };
+  return batchScoreJobs(env, await listAllJobs(env), profile);
 }
 
 function buildProfileSummary(profile: UserProfileRecord): string {

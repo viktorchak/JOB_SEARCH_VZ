@@ -71,6 +71,7 @@ export function ProfileBuilder({
   onSave,
 }: ProfileBuilderProps) {
   const activeUpdatedAt = activeProfile ? new Date(activeProfile.updated_at).toLocaleString() : "Not saved yet";
+  const isDefaultProfile = activeProfile?.is_default ?? true;
 
   return (
     <section className="rounded-[32px] border border-black/10 bg-white/85 p-5 shadow-[0_18px_60px_rgba(15,23,42,0.06)] backdrop-blur">
@@ -85,7 +86,9 @@ export function ProfileBuilder({
         </div>
         <div className="rounded-[24px] border border-black/10 bg-[#f7f4ee] px-4 py-3 text-sm text-slate-700">
           <p className="font-ui font-semibold text-slate-900">Active profile</p>
-          <p className="font-ui mt-1">Last updated: {activeUpdatedAt}</p>
+          <p className="font-ui mt-1">
+            {isDefaultProfile ? "Using starter defaults" : `Last updated: ${activeUpdatedAt}`}
+          </p>
         </div>
       </div>
 
@@ -186,8 +189,9 @@ export function ProfileBuilder({
             <BriefcaseBusiness className="h-4 w-4" />
           </div>
           <p className="font-ui max-w-3xl text-sm leading-6 text-slate-700">
-            Job family carries the most weight. Level combines seniority and years required. Career value
-            shifts between learning and ownership depending on the profile you save here.
+            {isDefaultProfile
+              ? "Save this once before your first serious search. Until then, the dashboard uses a generic starter profile and the scores are only provisional."
+              : "Job family carries the most weight. Level combines seniority and years required. Career value shifts between learning and ownership depending on the profile you save here."}
           </p>
         </div>
         <button

@@ -76,6 +76,7 @@ export interface UserProfileRecord {
   company_stage_preference: string;
   career_priority: string;
   updated_at: string;
+  is_default?: boolean;
 }
 
 export interface JobSearchRow {
@@ -128,6 +129,23 @@ export interface ConnectorHealthRow {
   last_error: string | null;
 }
 
+export interface SearchJobRowsParams {
+  q?: string | null;
+  location?: string | null;
+  min_score?: number;
+  max_score?: number | null;
+  remote_policy?: string[] | null;
+  date_posted_days?: number | null;
+  action_status?: string[] | null;
+  sort?: string;
+  limit?: number;
+  max_years_required?: number | null;
+  min_compensation?: number | null;
+  seniority_level?: string[] | null;
+  company_stage?: string[] | null;
+  hide_unknown_compensation?: boolean;
+}
+
 export interface GoogleTokenRow {
   id: string;
   access_token: string | null;
@@ -144,7 +162,7 @@ const GOOGLE_TOKEN_ID = "primary";
 
 const DEFAULT_PROFILE: Omit<UserProfileRecord, "updated_at"> = {
   id: DEFAULT_PROFILE_ID,
-  primary_job_family: "product_management",
+  primary_job_family: "strategy_operations",
   seniority_level: "mid_senior",
   years_experience_bucket: "5-7",
   compensation_floor: null,
@@ -214,12 +232,12 @@ export async function ensureActiveProfile(env: CloudflareEnv): Promise<UserProfi
   const supabase = getSupabase(env);
   const { data, error } = await supabase.from("profiles").select("*").eq("id", DEFAULT_PROFILE_ID).maybeSingle();
   if (error) throw new Error(error.message);
-  if (data) return data as UserProfileRecord;
+  if (data) return withProfileDefaults(data as UserProfileRecord);
 
   const payload = { ...DEFAULT_PROFILE, updated_at: nowIso() };
-  return unwrap(
+  return withProfileDefaults(await unwrap(
     supabase.from("profiles").upsert(payload, { onConflict: "id" }).select("*").single(),
-  ) as Promise<UserProfileRecord>;
+  ) as UserProfileRecord);
 }
 
 export async function saveActiveProfile(
@@ -227,13 +245,13 @@ export async function saveActiveProfile(
   payload: Omit<UserProfileRecord, "id" | "updated_at">,
 ): Promise<UserProfileRecord> {
   const supabase = getSupabase(env);
-  return unwrap(
+  return withProfileDefaults(await unwrap(
     supabase
       .from("profiles")
       .upsert({ id: DEFAULT_PROFILE_ID, ...payload, updated_at: nowIso() }, { onConflict: "id" })
       .select("*")
       .single(),
-  ) as Promise<UserProfileRecord>;
+  ) as UserProfileRecord);
 }
 
 export async function upsertJob(env: CloudflareEnv, payload: JobIngestRecord): Promise<{ job: JobRecord; created: boolean }> {
@@ -286,6 +304,20 @@ export async function listAllJobs(env: CloudflareEnv): Promise<JobRecord[]> {
   return (await unwrap(
     supabase.from("jobs").select("*").order("ingested_at", { ascending: false }).limit(5000),
   )) as JobRecord[];
+}
+
+export async function listAllJobAttributes(env: CloudflareEnv): Promise<JobAttributeRecord[]> {
+  const supabase = getSupabase(env);
+  return (await unwrap(
+    supabase.from("job_attributes").select("*").order("extracted_at", { ascending: false }).limit(5000),
+  )) as JobAttributeRecord[];
+}
+
+export async function listAllScores(env: CloudflareEnv): Promise<ScoreRecord[]> {
+  const supabase = getSupabase(env);
+  return (await unwrap(
+    supabase.from("fit_scores").select("*").order("scored_at", { ascending: false }).limit(5000),
+  )) as ScoreRecord[];
 }
 
 export async function listJobsMissingAttributes(env: CloudflareEnv): Promise<JobRecord[]> {
@@ -482,6 +514,40 @@ export async function listJobSearchRows(env: CloudflareEnv): Promise<JobSearchRo
   )) as JobSearchRow[];
 }
 
+export async function searchJobSearchRows(env: CloudflareEnv, filters: SearchJobRowsParams): Promise<JobSearchRow[]> {
+  const supabase = getSupabase(env);
+  const { data, error } = await supabase.rpc("search_jobs", {
+    p_q: filters.q?.trim() || null,
+    p_location: filters.location?.trim() || null,
+    p_min_score: filters.min_score ?? 0,
+    p_max_score: filters.max_score ?? null,
+    p_remote_policies: filters.remote_policy?.length ? filters.remote_policy : null,
+    p_date_posted_days: filters.date_posted_days ?? null,
+    p_action_statuses: filters.action_status?.length ? filters.action_status : null,
+    p_sort: filters.sort ?? "top",
+    p_limit: filters.limit ?? 200,
+    p_max_years_required: filters.max_years_required ?? null,
+    p_min_compensation: filters.min_compensation ?? null,
+    p_seniority_levels: filters.seniority_level?.length ? filters.seniority_level : null,
+    p_company_stages: filters.company_stage?.length ? filters.company_stage : null,
+    p_hide_unknown_compensation: filters.hide_unknown_compensation ?? false,
+  });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as JobSearchRow[];
+}
+
+export async function getJobSearchRow(env: CloudflareEnv, jobId: string): Promise<JobSearchRow | null> {
+  const supabase = getSupabase(env);
+  const { data, error } = await supabase
+    .from("job_search_rows")
+    .select("*")
+    .eq("job_id", jobId)
+    .not("total", "is", null)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as JobSearchRow | null) ?? null;
+}
+
 export async function saveGoogleOAuthState(env: CloudflareEnv, state: string): Promise<void> {
   const supabase = getSupabase(env);
   const { error } = await supabase.from("google_oauth_states").upsert({ state, created_at: nowIso() });
@@ -517,4 +583,22 @@ export async function saveGoogleToken(
       .select("*")
       .single(),
   ) as Promise<GoogleTokenRow>;
+}
+
+export function isDefaultProfile(profile: Pick<UserProfileRecord, keyof typeof DEFAULT_PROFILE>): boolean {
+  return (
+    profile.primary_job_family === DEFAULT_PROFILE.primary_job_family &&
+    profile.seniority_level === DEFAULT_PROFILE.seniority_level &&
+    profile.years_experience_bucket === DEFAULT_PROFILE.years_experience_bucket &&
+    profile.compensation_floor === DEFAULT_PROFILE.compensation_floor &&
+    profile.company_stage_preference === DEFAULT_PROFILE.company_stage_preference &&
+    profile.career_priority === DEFAULT_PROFILE.career_priority
+  );
+}
+
+export function withProfileDefaults(profile: UserProfileRecord): UserProfileRecord {
+  return {
+    ...profile,
+    is_default: isDefaultProfile(profile),
+  };
 }

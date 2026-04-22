@@ -2,8 +2,10 @@ import { getOptionalEnv } from "./env";
 import type { CloudflareEnv } from "./types";
 import type { JobIngestRecord } from "./supabase";
 
-const INTEREST_KEYWORDS = [
-  "product",
+const SUPPORTED_ROLE_KEYWORDS = [
+  "product manager",
+  "product management",
+  "product owner",
   "strategy",
   "operations",
   "bizops",
@@ -13,21 +15,35 @@ const INTEREST_KEYWORDS = [
   "eir",
   "general manager",
   "program manager",
-];
-
-const NOISE_KEYWORDS = [
-  "recruiter",
-  "sales",
-  "account executive",
+  "technical program manager",
+  "project manager",
+  "engineer",
+  "engineering",
+  "developer",
+  "software",
+  "frontend",
+  "backend",
+  "full stack",
+  "platform",
+  "data analyst",
+  "analytics",
+  "data scientist",
   "designer",
-  "software engineer",
-  "frontend engineer",
-  "backend engineer",
-  "data engineer",
-  "customer success",
-  "support engineer",
-  "hr business partner",
+  "design",
+  "researcher",
+  "partnerships",
+  "business development",
+  "sales",
+  "gtm",
   "marketing",
+  "finance",
+  "accounting",
+  "legal",
+  "people ops",
+  "recruiting",
+  "talent acquisition",
+  "customer success",
+  "support",
 ];
 
 const JSEARCH_QUERIES = [
@@ -36,6 +52,11 @@ const JSEARCH_QUERIES = [
   "engineering",
   "program management",
   "business operations",
+  "partnerships",
+  "data analytics",
+  "design",
+  "sales",
+  "finance OR recruiting OR customer success",
 ];
 
 function normalizeWhitespace(value: string): string {
@@ -77,11 +98,11 @@ function parseDateTime(value: unknown): string | null {
 }
 
 function matchesTargetRole(title: string, department?: string | null, description?: string | null): boolean {
-  const haystack = [title, department ?? "", description ?? ""].join(" ").toLowerCase();
-  const titleLower = title.toLowerCase();
-  if (!INTEREST_KEYWORDS.some((keyword) => haystack.includes(keyword))) return false;
-  if (NOISE_KEYWORDS.some((keyword) => titleLower.includes(keyword))) return false;
-  return true;
+  const titleHaystack = [title, department ?? ""].join(" ").toLowerCase();
+  if (SUPPORTED_ROLE_KEYWORDS.some((keyword) => titleHaystack.includes(keyword))) return true;
+
+  const descriptionHaystack = (description ?? "").toLowerCase();
+  return SUPPORTED_ROLE_KEYWORDS.some((keyword) => descriptionHaystack.includes(keyword));
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {

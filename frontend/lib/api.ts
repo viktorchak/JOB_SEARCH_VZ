@@ -72,6 +72,7 @@ export interface UserProfile {
   company_stage_preference: CompanyStagePreference;
   career_priority: CareerPriority;
   updated_at: string;
+  is_default?: boolean;
 }
 
 export interface UserProfileUpdate {
@@ -121,6 +122,7 @@ export interface GoogleAuthStatus {
   configured: boolean;
   authenticated: boolean;
   token_path: string | null;
+  email_from?: string | null;
 }
 
 export interface HealthResponse {

@@ -1,28 +1,28 @@
 import { parseCsv } from "./env";
 import type { CloudflareEnv } from "./types";
 
-function buildAllowedOrigins(env: CloudflareEnv, request: Request): Set<string> {
-  const allowed = new Set(parseCsv(env.CORS_ALLOWED_ORIGINS));
-  const requestUrl = new URL(request.url);
-  allowed.add(requestUrl.origin);
-  return allowed;
+function buildAllowedOrigins(env: CloudflareEnv): Set<string> {
+  return new Set(parseCsv(env.CORS_ALLOWED_ORIGINS));
 }
 
 export function isOriginAllowed(env: CloudflareEnv, request: Request): boolean {
   const origin = request.headers.get("origin");
   if (!origin) return true;
-  return buildAllowedOrigins(env, request).has(origin);
+  const requestOrigin = new URL(request.url).origin;
+  if (origin === requestOrigin) return true;
+  return buildAllowedOrigins(env).has(origin);
 }
 
 export function buildCorsHeaders(env: CloudflareEnv, request: Request): HeadersInit {
   const origin = request.headers.get("origin");
-  const allowedOrigins = buildAllowedOrigins(env, request);
+  const allowedOrigins = buildAllowedOrigins(env);
+  const requestOrigin = new URL(request.url).origin;
   const headers: Record<string, string> = {
     "Access-Control-Allow-Methods": "GET,POST,PUT,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Max-Age": "86400",
   };
-  if (origin && allowedOrigins.has(origin)) {
+  if (origin && (origin === requestOrigin || allowedOrigins.has(origin))) {
     headers["Access-Control-Allow-Origin"] = origin;
     headers["Vary"] = "Origin";
   }

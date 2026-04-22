@@ -10,13 +10,14 @@ import {
   batchUpsertScores,
   deleteDerivedForJobs,
   ensureActiveProfile,
+  getJobSearchRow,
   getJob,
   getScore,
   listAllJobs,
   listActions,
   listConnectorHealth,
-  listJobSearchRows,
   saveActiveProfile,
+  searchJobSearchRows,
   setConnectorHealth,
   upsertJob,
   type JobRecord,
@@ -99,20 +100,6 @@ function buildSummary(row: JobSearchRow) {
   };
 }
 
-function relevanceScore(row: JobSearchRow, terms: string[]): number {
-  if (!terms.length) return 0;
-  const title = row.title.toLowerCase();
-  const company = row.company.toLowerCase();
-  const jd = row.jd_text.toLowerCase();
-  return terms.reduce((score, term) => {
-    let next = score;
-    if (title.includes(term)) next += 6;
-    if (company.includes(term)) next += 3;
-    if (jd.includes(term)) next += 1;
-    return next;
-  }, 0);
-}
-
 function leenaVerification(rows: JobSearchRow[]) {
   const match = rows
     .filter(
@@ -139,22 +126,6 @@ function leenaVerification(rows: JobSearchRow[]) {
     matched_title: match.title,
     matched_company: match.company,
   };
-}
-
-function sortRows(rows: Array<JobSearchRow & { _relevance: number }>, sort: string, hasQuery: boolean) {
-  if (sort === "newest") {
-    rows.sort((left, right) => (right.posted_at ?? "").localeCompare(left.posted_at ?? "") || (right.total ?? 0) - (left.total ?? 0));
-    return;
-  }
-  if (sort === "recent") {
-    rows.sort((left, right) => right.ingested_at.localeCompare(left.ingested_at) || (right.total ?? 0) - (left.total ?? 0));
-    return;
-  }
-  if (sort === "relevance" || hasQuery) {
-    rows.sort((left, right) => right._relevance - left._relevance || (right.total ?? 0) - (left.total ?? 0) || right.ingested_at.localeCompare(left.ingested_at));
-    return;
-  }
-  rows.sort((left, right) => (right.total ?? 0) - (left.total ?? 0) || right.ingested_at.localeCompare(left.ingested_at));
 }
 
 export async function getHealth(env: CloudflareEnv) {
@@ -283,62 +254,36 @@ export async function listJobsResponse(
   }
 
   const profile = await ensureActiveProfile(env);
-  const allRows = (await listJobSearchRows(env)).filter((row) => row.total !== null);
-  const companies = Array.from(new Set(allRows.map((row) => row.company))).sort((left, right) => left.localeCompare(right));
-
-  const qTerms = (filters.q ?? "")
-    .trim()
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(Boolean);
-
-  const locationTerms = (filters.location ?? "")
-    .trim()
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(Boolean);
-
-  const rows = allRows
-    .filter((row) => (filters.min_score ?? 0) <= (row.total ?? 0))
-    .filter((row) => (filters.max_score === null || filters.max_score === undefined ? true : (row.total ?? 0) <= filters.max_score))
-    .filter((row) => !filters.remote_policy?.length || filters.remote_policy.includes(row.remote_policy))
-    .filter((row) => !filters.date_posted_days || (row.posted_at ? new Date(row.posted_at).getTime() >= Date.now() - filters.date_posted_days * 86_400_000 : false))
-    .filter((row) => !locationTerms.length || locationTerms.every((term) => row.location.toLowerCase().includes(term)))
-    .filter((row) => !qTerms.length || qTerms.every((term) => row.title.toLowerCase().includes(term) || row.company.toLowerCase().includes(term) || row.jd_text.toLowerCase().includes(term)))
-    .filter((row) => {
-      if (!filters.action_status?.length) return true;
-      return filters.action_status.includes(row.latest_action_status ?? "unreviewed");
-    })
-    .filter((row) => filters.max_years_required === null || filters.max_years_required === undefined || row.years_required_min === null || row.years_required_min <= filters.max_years_required)
-    .filter((row) => {
-      if (filters.min_compensation === null || filters.min_compensation === undefined) {
-        return !filters.hide_unknown_compensation || Boolean(row.compensation_known);
-      }
-      const value = row.compensation_max ?? row.compensation_min ?? 0;
-      if (filters.hide_unknown_compensation) {
-        return Boolean(row.compensation_known) && value >= filters.min_compensation;
-      }
-      return !row.compensation_known || value >= filters.min_compensation;
-    })
-    .filter((row) => !filters.seniority_level?.length || filters.seniority_level.includes(row.attr_seniority_level ?? "unknown"))
-    .filter((row) => !filters.company_stage?.length || filters.company_stage.includes(row.company_stage ?? "unknown"))
-    .map((row) => ({ ...row, _relevance: relevanceScore(row, qTerms) }));
-
-  sortRows(rows, filters.sort ?? "top", qTerms.length > 0);
-  const limit = filters.limit ?? 200;
-  const items = rows.slice(0, limit).map((row) => buildSummary(row));
+  const rows = await searchJobSearchRows(env, {
+    q: filters.q,
+    location: filters.location,
+    min_score: filters.min_score,
+    max_score: filters.max_score,
+    remote_policy: filters.remote_policy,
+    date_posted_days: filters.date_posted_days,
+    action_status: filters.action_status,
+    sort: filters.sort,
+    limit: filters.limit,
+    max_years_required: filters.max_years_required,
+    min_compensation: filters.min_compensation,
+    seniority_level: filters.seniority_level,
+    company_stage: filters.company_stage,
+    hide_unknown_compensation: filters.hide_unknown_compensation,
+  });
+  const companies = Array.from(new Set(rows.map((row) => row.company))).sort((left, right) => left.localeCompare(right));
+  const items = rows.map((row) => buildSummary(row));
 
   return {
     items,
     total: items.length,
     companies,
     profile,
-    verification: leenaVerification(allRows),
+    verification: leenaVerification(rows),
   };
 }
 
 export async function getJobDetailResponse(env: CloudflareEnv, jobId: string) {
-  const row = (await listJobSearchRows(env)).find((item) => item.job_id === jobId && item.total !== null);
+  const row = await getJobSearchRow(env, jobId);
   if (!row) return null;
   return {
     ...buildSummary(row),

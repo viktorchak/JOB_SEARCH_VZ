@@ -28,7 +28,7 @@ type JobTab = "all" | Extract<ActionStatus, "saved" | "applied" | "dismissed">;
 
 const DISMISS_DEFAULT = "Overqualified";
 const DEFAULT_PROFILE: UserProfileUpdate = {
-  primary_job_family: "product_management",
+  primary_job_family: "strategy_operations",
   seniority_level: "mid_senior",
   years_experience_bucket: "5-7",
   compensation_floor: null,
@@ -74,8 +74,8 @@ export function JobDashboard() {
   const [locationFilter, setLocationFilter] = useState("");
   const [remotePolicy, setRemotePolicy] = useState<RemotePolicy | "">("");
   const [datePostedDays, setDatePostedDays] = useState<number | null>(null);
-  const [minScore, setMinScore] = useState(60);
-  const [sort, setSort] = useState<JobSearchFilters["sort"]>("top");
+  const [minScore, setMinScore] = useState(0);
+  const [sort, setSort] = useState<JobSearchFilters["sort"]>("newest");
   const [tab, setTab] = useState<JobTab>("all");
   const [maxYearsRequired, setMaxYearsRequired] = useState<number | null>(null);
   const [minCompensation, setMinCompensation] = useState<number | null>(null);
@@ -85,6 +85,7 @@ export function JobDashboard() {
 
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const profileSectionRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -194,9 +195,16 @@ export function JobDashboard() {
   async function saveProfile() {
     setSavingProfile(true);
     try {
+      const wasDefaultProfile = profile?.is_default ?? true;
       const saved = await api.saveProfile(profileDraft);
       setProfile(saved);
-      await loadJobs(filters);
+      const nextMinScore = wasDefaultProfile && filters.minScore === 0 ? 60 : filters.minScore;
+      const nextSort = wasDefaultProfile && filters.sort === "newest" ? "top" : filters.sort;
+      if (wasDefaultProfile) {
+        setMinScore(nextMinScore);
+        setSort(nextSort);
+      }
+      await loadJobs({ ...filters, minScore: nextMinScore, sort: nextSort });
       toast("success", "Saved your scoring profile and reranked the corpus.");
     } catch (error) {
       toast("error", toMessage(error));
@@ -256,8 +264,26 @@ export function JobDashboard() {
   async function connectGoogle() {
     try {
       const response = await api.getGoogleAuthUrl();
-      window.open(response.authorization_url, "_blank", "noopener,noreferrer");
+      const authWindow = window.open(response.authorization_url, "_blank", "noopener,noreferrer");
       toast("success", "Opened Google OAuth in a new tab.");
+      for (let attempt = 0; attempt < 24; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 2500));
+        const nextHealth = await api.getHealth();
+        setHealth(nextHealth);
+        if (nextHealth.google.authenticated) {
+          toast(
+            "success",
+            nextHealth.google.email_from
+              ? `Google connected as ${nextHealth.google.email_from}.`
+              : "Google connected successfully.",
+          );
+          return;
+        }
+        if (authWindow && authWindow.closed && attempt >= 1) {
+          break;
+        }
+      }
+      toast("error", "Google is still not authenticated. Complete the consent screen, then try again.");
     } catch (error) {
       toast("error", toMessage(error));
     }
@@ -361,6 +387,26 @@ export function JobDashboard() {
 
   const googleConfigured = Boolean(health?.google.configured);
   const googleAuthenticated = Boolean(health?.google.authenticated);
+  const googleEmail = health?.google.email_from ?? null;
+  const profileIsDefault = profile?.is_default ?? true;
+  const hasSyncedJobs = Boolean(health?.connectors.some((connector) => Boolean(connector.last_success_at)));
+  const hasActiveSearch = Boolean(query.trim());
+  const hasActiveFilters = Boolean(
+    locationFilter.trim() ||
+      remotePolicy ||
+      datePostedDays ||
+      minScore > 0 ||
+      tab !== "all" ||
+      maxYearsRequired !== null ||
+      minCompensation !== null ||
+      seniorityFilter ||
+      companyStageFilter ||
+      hideUnknownCompensation,
+  );
+
+  function focusProfileBuilder() {
+    profileSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   return (
     <>
@@ -371,6 +417,8 @@ export function JobDashboard() {
               q={query}
               googleConfigured={googleConfigured}
               googleAuthenticated={googleAuthenticated}
+              googleEmail={googleEmail}
+              profileIsDefault={profileIsDefault}
               refreshing={refreshing}
               connectors={health?.connectors ?? []}
               onQueryChange={setQuery}
@@ -380,7 +428,7 @@ export function JobDashboard() {
               formatDateTime={formatDateTime}
             />
 
-            <div className="mt-6">
+            <div className="mt-6" ref={profileSectionRef}>
               <ProfileBuilder
                 profile={profileDraft}
                 activeProfile={profile}
@@ -423,10 +471,16 @@ export function JobDashboard() {
                 jobs={jobs}
                 total={total}
                 loading={loadingJobs}
+                hasSyncedJobs={hasSyncedJobs}
+                profileIsDefault={profileIsDefault}
+                hasActiveSearch={hasActiveSearch}
+                hasActiveFilters={hasActiveFilters}
                 selectedJobId={selectedJobId}
                 onSelectJob={selectJob}
                 onApply={handleApply}
                 onSave={handleSave}
+                onRefresh={refreshAll}
+                onFocusProfile={focusProfileBuilder}
                 formatDate={formatDate}
               />
 

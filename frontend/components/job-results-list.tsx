@@ -12,10 +12,16 @@ interface JobResultsListProps {
   jobs: JobSummary[];
   total: number;
   loading: boolean;
+  hasSyncedJobs: boolean;
+  profileIsDefault: boolean;
+  hasActiveSearch: boolean;
+  hasActiveFilters: boolean;
   selectedJobId: string | null;
   onSelectJob: (job: JobSummary, mode?: DetailMode) => Promise<void>;
   onApply: (job: JobSummary) => Promise<void>;
   onSave: (job: JobSummary) => Promise<void>;
+  onRefresh: () => Promise<void>;
+  onFocusProfile: () => void;
   formatDate: (value: string | null) => string;
 }
 
@@ -66,12 +72,22 @@ export function JobResultsList({
   jobs,
   total,
   loading,
+  hasSyncedJobs,
+  profileIsDefault,
+  hasActiveSearch,
+  hasActiveFilters,
   selectedJobId,
   onSelectJob,
   onApply,
   onSave,
+  onRefresh,
+  onFocusProfile,
   formatDate,
 }: JobResultsListProps) {
+  const showFirstRunEmpty = !loading && !jobs.length && !hasSyncedJobs;
+  const showFilteredEmpty = !loading && !jobs.length && (hasActiveSearch || hasActiveFilters);
+  const showProfileEmpty = !loading && !jobs.length && hasSyncedJobs && profileIsDefault;
+
   return (
     <section className="rounded-[32px] border border-black/10 bg-white/85 p-4 backdrop-blur">
       <div className="mb-4 flex items-center justify-between border-b border-black/10 pb-4">
@@ -162,7 +178,58 @@ export function JobResultsList({
             );
           })}
         </div>
-      ) : (
+      ) : showFirstRunEmpty ? (
+        <div className="flex flex-col items-center justify-center rounded-[28px] bg-[#f7f4ee] px-6 py-20 text-center">
+          <div className="rounded-full bg-teal-50 p-4">
+            <Sparkles className="h-6 w-6 text-teal-800" />
+          </div>
+          <h2 className="font-display mt-5 text-2xl font-semibold text-slate-950">
+            Run your first live sync
+          </h2>
+          <p className="font-ui mt-3 max-w-xl text-sm leading-7 text-slate-600">
+            Save your profile, then pull the current JSearch corpus into Supabase. After that, the list
+            will fill with ranked jobs and live search will expand it on demand.
+          </p>
+          <div className="mt-6 flex flex-wrap justify-center gap-3">
+            <button
+              type="button"
+              onClick={onFocusProfile}
+              className="font-ui rounded-full border border-black/10 bg-white px-5 py-3 text-sm text-slate-800 transition hover:border-black/20"
+            >
+              Review profile
+            </button>
+            <button
+              type="button"
+              onClick={() => void onRefresh()}
+              className="font-ui rounded-full bg-slate-950 px-5 py-3 text-sm text-white transition hover:bg-slate-800"
+            >
+              Sync live jobs
+            </button>
+          </div>
+        </div>
+      ) : showProfileEmpty ? (
+        <div className="flex flex-col items-center justify-center rounded-[28px] bg-[#f7f4ee] px-6 py-20 text-center">
+          <div className="rounded-full bg-amber-50 p-4">
+            <Sparkles className="h-6 w-6 text-amber-800" />
+          </div>
+          <h2 className="font-display mt-5 text-2xl font-semibold text-slate-950">
+            Personalize ranking before filtering hard
+          </h2>
+          <p className="font-ui mt-3 max-w-xl text-sm leading-7 text-slate-600">
+            Jobs have synced, but the current ranking still uses the starter profile. Save your job family,
+            level, and career priority so the list reflects your actual search.
+          </p>
+          <div className="mt-6">
+            <button
+              type="button"
+              onClick={onFocusProfile}
+              className="font-ui rounded-full bg-slate-950 px-5 py-3 text-sm text-white transition hover:bg-slate-800"
+            >
+              Complete profile
+            </button>
+          </div>
+        </div>
+      ) : showFilteredEmpty ? (
         <div className="flex flex-col items-center justify-center rounded-[28px] bg-[#f7f4ee] px-6 py-20 text-center">
           <div className="rounded-full bg-teal-50 p-4">
             <Sparkles className="h-6 w-6 text-teal-800" />
@@ -173,6 +240,28 @@ export function JobResultsList({
           <p className="font-ui mt-3 max-w-xl text-sm leading-7 text-slate-600">
             Adjust the query, remove a filter chip, or lower the match score threshold.
           </p>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center justify-center rounded-[28px] bg-[#f7f4ee] px-6 py-20 text-center">
+          <div className="rounded-full bg-teal-50 p-4">
+            <Sparkles className="h-6 w-6 text-teal-800" />
+          </div>
+          <h2 className="font-display mt-5 text-2xl font-semibold text-slate-950">
+            No ranked jobs yet
+          </h2>
+          <p className="font-ui mt-3 max-w-xl text-sm leading-7 text-slate-600">
+            The live corpus is available, but there are no scored rows matching the current view yet. Run a
+            refresh or search a company directly to pull targeted live jobs.
+          </p>
+          <div className="mt-6">
+            <button
+              type="button"
+              onClick={() => void onRefresh()}
+              className="font-ui rounded-full bg-slate-950 px-5 py-3 text-sm text-white transition hover:bg-slate-800"
+            >
+              Refresh jobs
+            </button>
+          </div>
         </div>
       )}
     </section>
