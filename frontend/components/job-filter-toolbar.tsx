@@ -1,28 +1,35 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { ShieldCheck, SlidersHorizontal, X } from "lucide-react";
 
-import type { ActionStatus, ConnectorName, JobListResponse, RemotePolicy } from "@/lib/api";
+import type { ActionStatus, CompanyStage, JobListResponse, ProfileSeniority, RemotePolicy } from "@/lib/api";
 
 interface JobFilterToolbarProps {
+  location: string;
   remotePolicy: RemotePolicy | "";
   datePostedDays: number | null;
-  source: ConnectorName | "";
-  company: string;
   minScore: number;
-  sort: "top" | "relevance" | "newest" | "recent" | "company";
+  sort: "top" | "relevance" | "newest" | "recent";
   tab: "all" | Extract<ActionStatus, "saved" | "applied" | "dismissed">;
-  companies: string[];
   verification: JobListResponse["verification"] | null;
+  maxYearsRequired: number | null;
+  minCompensation: number | null;
+  seniorityLevel: ProfileSeniority | "";
+  companyStage: Exclude<CompanyStage, "unknown"> | "";
+  hideUnknownCompensation: boolean;
+  onLocationChange: (value: string) => void;
   onRemotePolicyChange: (value: RemotePolicy | "") => void;
   onDatePostedDaysChange: (value: number | null) => void;
-  onSourceChange: (value: ConnectorName | "") => void;
-  onCompanyChange: (value: string) => void;
   onMinScoreChange: (value: number) => void;
-  onSortChange: (value: "top" | "relevance" | "newest" | "recent" | "company") => void;
+  onSortChange: (value: "top" | "relevance" | "newest" | "recent") => void;
   onTabChange: (value: "all" | Extract<ActionStatus, "saved" | "applied" | "dismissed">) => void;
-  onClearFilter: (key: "remote" | "date" | "source" | "company" | "score" | "tab") => void;
+  onMaxYearsRequiredChange: (value: number | null) => void;
+  onMinCompensationChange: (value: number | null) => void;
+  onSeniorityLevelChange: (value: ProfileSeniority | "") => void;
+  onCompanyStageChange: (value: Exclude<CompanyStage, "unknown"> | "") => void;
+  onHideUnknownCompensationChange: (value: boolean) => void;
+  onClearFilter: (key: "date" | "score" | "tab" | "hard") => void;
 }
 
 function FilterSelect({
@@ -51,34 +58,49 @@ function FilterSelect({
 }
 
 export function JobFilterToolbar({
+  location,
   remotePolicy,
   datePostedDays,
-  source,
-  company,
   minScore,
   sort,
   tab,
-  companies,
   verification,
+  maxYearsRequired,
+  minCompensation,
+  seniorityLevel,
+  companyStage,
+  hideUnknownCompensation,
+  onLocationChange,
   onRemotePolicyChange,
   onDatePostedDaysChange,
-  onSourceChange,
-  onCompanyChange,
   onMinScoreChange,
   onSortChange,
   onTabChange,
+  onMaxYearsRequiredChange,
+  onMinCompensationChange,
+  onSeniorityLevelChange,
+  onCompanyStageChange,
+  onHideUnknownCompensationChange,
   onClearFilter,
 }: JobFilterToolbarProps) {
+  const [hardFiltersOpen, setHardFiltersOpen] = useState(false);
+
+  const hardFilterCount = [
+    location,
+    remotePolicy,
+    maxYearsRequired !== null ? String(maxYearsRequired) : "",
+    minCompensation !== null ? String(minCompensation) : "",
+    seniorityLevel,
+    companyStage,
+    hideUnknownCompensation ? "true" : "",
+  ].filter(Boolean).length;
+
   const activeFilters = [
-    remotePolicy
-      ? { key: "remote" as const, label: remotePolicy === "remote" ? "Remote" : remotePolicy }
-      : null,
     datePostedDays ? { key: "date" as const, label: `Past ${datePostedDays} days` } : null,
-    source ? { key: "source" as const, label: source } : null,
-    company ? { key: "company" as const, label: company } : null,
     minScore > 0 ? { key: "score" as const, label: `Score ${minScore}+` } : null,
+    hardFilterCount ? { key: "hard" as const, label: `Hard filters ${hardFilterCount}` } : null,
     tab !== "all" ? { key: "tab" as const, label: tab } : null,
-  ].filter(Boolean) as Array<{ key: "remote" | "date" | "source" | "company" | "score" | "tab"; label: string }>;
+  ].filter(Boolean) as Array<{ key: "date" | "score" | "tab" | "hard"; label: string }>;
 
   return (
     <div className="space-y-4">
@@ -91,26 +113,15 @@ export function JobFilterToolbar({
             <div className="min-w-0 flex-1">
               <p className="font-ui text-sm font-semibold text-slate-900">Leena verification</p>
               <p className="font-ui mt-1 text-sm leading-6 text-slate-700">
-            {verification?.leena_eir_present
-              ? `A Leena EIR match is present in the scored corpus from ${verification.matched_source}.`
-              : "No Leena EIR match is present in the current scored corpus from the public API feeds."}
+                {verification?.leena_eir_present
+                  ? `A Leena-related role is present in the scored corpus from ${verification.matched_source}.`
+                  : "No Leena match is present in the current scored corpus from the public API feeds."}
               </p>
             </div>
           </div>
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-3">
-          <FilterSelect
-            label="Remote"
-            value={remotePolicy}
-            onChange={(value) => onRemotePolicyChange(value as RemotePolicy | "")}
-          >
-            <option value="">Any</option>
-            <option value="remote">Remote</option>
-            <option value="hybrid">Hybrid</option>
-            <option value="onsite">Onsite</option>
-          </FilterSelect>
-
           <FilterSelect
             label="Date posted"
             value={datePostedDays ? String(datePostedDays) : ""}
@@ -124,33 +135,11 @@ export function JobFilterToolbar({
             <option value="30">Past 30 days</option>
           </FilterSelect>
 
-          <FilterSelect
-            label="Source"
-            value={source}
-            onChange={(value) => onSourceChange(value as ConnectorName | "")}
-          >
-            <option value="">All sources</option>
-            <option value="jsearch">JSearch</option>
-            <option value="remotive">Remotive</option>
-            <option value="remoteok">Remote OK</option>
-            <option value="jobicy">Jobicy</option>
-          </FilterSelect>
-
-          <FilterSelect label="Company" value={company} onChange={onCompanyChange}>
-            <option value="">All companies</option>
-            {companies.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </FilterSelect>
-
           <FilterSelect label="Sort" value={sort} onChange={(value) => onSortChange(value as typeof sort)}>
             <option value="top">Top matches</option>
             <option value="relevance">Relevance</option>
             <option value="newest">Newest</option>
             <option value="recent">Recently ingested</option>
-            <option value="company">Company A–Z</option>
           </FilterSelect>
 
           <div className="font-ui inline-flex items-center gap-3 rounded-full border border-black/10 bg-white px-4 py-2 text-sm text-slate-700">
@@ -166,7 +155,108 @@ export function JobFilterToolbar({
               className="w-28 accent-teal-700"
             />
           </div>
+
+          <button
+            type="button"
+            onClick={() => setHardFiltersOpen((current) => !current)}
+            className={`font-ui inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm transition ${
+              hardFiltersOpen || hardFilterCount
+                ? "border-teal-200 bg-teal-50 text-teal-900"
+                : "border-black/10 bg-white text-slate-700 hover:border-black/20 hover:text-slate-900"
+            }`}
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+            Hard filters
+            {hardFilterCount ? <span className="rounded-full bg-white px-2 py-0.5 text-xs">{hardFilterCount}</span> : null}
+          </button>
         </div>
+
+        {hardFiltersOpen ? (
+          <div className="mt-4 rounded-[28px] border border-black/10 bg-[#fffaf4] p-4">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <label className="font-ui rounded-[24px] border border-black/10 bg-white px-4 py-3 text-sm text-slate-700">
+                <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-slate-500">Location</span>
+                <input
+                  value={location}
+                  onChange={(event) => onLocationChange(event.target.value)}
+                  placeholder="New York, remote, SF"
+                  className="w-full bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                />
+              </label>
+
+              <FilterSelect
+                label="Remote"
+                value={remotePolicy}
+                onChange={(value) => onRemotePolicyChange(value as RemotePolicy | "")}
+              >
+                <option value="">Any</option>
+                <option value="remote">Remote</option>
+                <option value="hybrid">Hybrid</option>
+                <option value="onsite">Onsite</option>
+              </FilterSelect>
+
+              <label className="font-ui rounded-[24px] border border-black/10 bg-white px-4 py-3 text-sm text-slate-700">
+                <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-slate-500">Max Years Required</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={maxYearsRequired ?? ""}
+                  onChange={(event) => onMaxYearsRequiredChange(event.target.value ? Number(event.target.value) : null)}
+                  placeholder="Any"
+                  className="w-full bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                />
+              </label>
+
+              <label className="font-ui rounded-[24px] border border-black/10 bg-white px-4 py-3 text-sm text-slate-700">
+                <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-slate-500">Min Compensation</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={minCompensation ?? ""}
+                  onChange={(event) => onMinCompensationChange(event.target.value ? Number(event.target.value) : null)}
+                  placeholder="Any"
+                  className="w-full bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                />
+              </label>
+
+              <FilterSelect
+                label="Seniority"
+                value={seniorityLevel}
+                onChange={(value) => onSeniorityLevelChange(value as ProfileSeniority | "")}
+              >
+                <option value="">Any</option>
+                <option value="internship">Internship</option>
+                <option value="entry_level">Entry level</option>
+                <option value="associate">Associate</option>
+                <option value="mid_senior">Mid-Senior</option>
+                <option value="director">Director</option>
+                <option value="executive">Executive</option>
+              </FilterSelect>
+
+              <FilterSelect
+                label="Stage"
+                value={companyStage}
+                onChange={(value) => onCompanyStageChange(value as Exclude<CompanyStage, "unknown"> | "")}
+              >
+                <option value="">Any</option>
+                <option value="startup">Startup</option>
+                <option value="growth">Growth</option>
+                <option value="late_stage">Late-stage</option>
+                <option value="public">Public</option>
+              </FilterSelect>
+            </div>
+
+            <label className="font-ui mt-4 inline-flex items-center gap-3 rounded-full border border-black/10 bg-white px-4 py-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={hideUnknownCompensation}
+                onChange={(event) => onHideUnknownCompensationChange(event.target.checked)}
+                className="accent-teal-700"
+              />
+              Hide jobs with unknown salary
+            </label>
+          </div>
+        ) : null}
 
         {activeFilters.length ? (
           <div className="mt-4 flex flex-wrap gap-2">

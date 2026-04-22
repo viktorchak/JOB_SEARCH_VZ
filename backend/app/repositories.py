@@ -10,13 +10,29 @@ from app.schemas import (
     ActionRecord,
     ActionType,
     ConnectorStatus,
+    JobAttributeRecord,
     JobDetail,
     JobIngest,
     JobRecord,
     JobSummary,
     ScorePayload,
     ScoreRecord,
+    UserProfile,
+    UserProfileUpdate,
     VerificationStatus,
+)
+
+
+DEFAULT_PROFILE_ID = "active-profile"
+DEFAULT_PROFILE = UserProfile(
+    id=DEFAULT_PROFILE_ID,
+    primary_job_family="product_management",
+    seniority_level="mid_senior",
+    years_experience_bucket="5-7",
+    compensation_floor=None,
+    company_stage_preference="no_preference",
+    career_priority="balanced",
+    updated_at=datetime.now(UTC).replace(tzinfo=None),
 )
 
 
@@ -48,7 +64,8 @@ class Repository:
                     """
                     UPDATE jobs
                     SET company = ?, title = ?, location = ?, remote_policy = ?, jd_text = ?,
-                        jd_url = ?, posted_at = ?, ingested_at = ?
+                        jd_url = ?, posted_at = ?, salary_min = ?, salary_max = ?, salary_currency = ?,
+                        salary_period = ?, ingested_at = ?
                     WHERE id = ?
                     """,
                     (
@@ -59,10 +76,16 @@ class Repository:
                         job.jd_text,
                         job.jd_url,
                         _serialize_datetime(job.posted_at),
+                        job.salary_min,
+                        job.salary_max,
+                        job.salary_currency,
+                        job.salary_period,
                         _serialize_datetime(now),
                         existing["id"],
                     ),
                 )
+                connection.execute("DELETE FROM job_attributes WHERE job_id = ?", (existing["id"],))
+                connection.execute("DELETE FROM fit_scores WHERE job_id = ?", (existing["id"],))
                 row = connection.execute("SELECT * FROM jobs WHERE id = ?", (existing["id"],)).fetchone()
                 return self._row_to_job(row), False
 
@@ -71,8 +94,9 @@ class Repository:
                 """
                 INSERT INTO jobs (
                     id, source, external_id, company, title, location, remote_policy,
-                    jd_text, jd_url, posted_at, ingested_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    jd_text, jd_url, posted_at, salary_min, salary_max, salary_currency,
+                    salary_period, ingested_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     job_id,
@@ -85,16 +109,82 @@ class Repository:
                     job.jd_text,
                     job.jd_url,
                     _serialize_datetime(job.posted_at),
+                    job.salary_min,
+                    job.salary_max,
+                    job.salary_currency,
+                    job.salary_period,
                     _serialize_datetime(now),
                 ),
             )
             row = connection.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
             return self._row_to_job(row), True
 
-    def get_job(self, job_id: str) -> JobRecord | None:
+    def list_all_jobs(self) -> list[JobRecord]:
         with get_connection() as connection:
-            row = connection.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
-        return self._row_to_job(row) if row else None
+            rows = connection.execute("SELECT * FROM jobs ORDER BY ingested_at DESC").fetchall()
+        return [self._row_to_job(row) for row in rows]
+
+    def list_jobs_missing_attributes(self) -> list[JobRecord]:
+        with get_connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT j.*
+                FROM jobs j
+                LEFT JOIN job_attributes a ON a.job_id = j.id
+                WHERE a.job_id IS NULL
+                ORDER BY j.ingested_at DESC
+                """
+            ).fetchall()
+        return [self._row_to_job(row) for row in rows]
+
+    def save_job_attributes(self, payload: JobAttributeRecord) -> JobAttributeRecord:
+        with get_connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO job_attributes (
+                    job_id, job_family, seniority_level, years_required_min, years_required_max,
+                    compensation_known, compensation_min, compensation_max, compensation_currency,
+                    compensation_period, company_stage, learning_signal, ownership_signal, extracted_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(job_id) DO UPDATE SET
+                    job_family = excluded.job_family,
+                    seniority_level = excluded.seniority_level,
+                    years_required_min = excluded.years_required_min,
+                    years_required_max = excluded.years_required_max,
+                    compensation_known = excluded.compensation_known,
+                    compensation_min = excluded.compensation_min,
+                    compensation_max = excluded.compensation_max,
+                    compensation_currency = excluded.compensation_currency,
+                    compensation_period = excluded.compensation_period,
+                    company_stage = excluded.company_stage,
+                    learning_signal = excluded.learning_signal,
+                    ownership_signal = excluded.ownership_signal,
+                    extracted_at = excluded.extracted_at
+                """,
+                (
+                    payload.job_id,
+                    payload.job_family,
+                    payload.seniority_level,
+                    payload.years_required_min,
+                    payload.years_required_max,
+                    int(payload.compensation_known),
+                    payload.compensation_min,
+                    payload.compensation_max,
+                    payload.compensation_currency,
+                    payload.compensation_period,
+                    payload.company_stage,
+                    payload.learning_signal,
+                    payload.ownership_signal,
+                    _serialize_datetime(payload.extracted_at),
+                ),
+            )
+            row = connection.execute("SELECT * FROM job_attributes WHERE job_id = ?", (payload.job_id,)).fetchone()
+        return self._row_to_attributes(row)
+
+    def get_job_attributes(self, job_id: str) -> JobAttributeRecord | None:
+        with get_connection() as connection:
+            row = connection.execute("SELECT * FROM job_attributes WHERE job_id = ?", (job_id,)).fetchone()
+        return self._row_to_attributes(row) if row else None
 
     def list_unscored_jobs(self, rubric_version: str) -> list[JobRecord]:
         with get_connection() as connection:
@@ -102,8 +192,7 @@ class Repository:
                 """
                 SELECT j.*
                 FROM jobs j
-                LEFT JOIN scores s
-                  ON s.job_id = j.id AND s.rubric_version = ?
+                LEFT JOIN fit_scores s ON s.job_id = j.id AND s.rubric_version = ?
                 WHERE s.id IS NULL
                 ORDER BY j.ingested_at DESC
                 """,
@@ -117,18 +206,19 @@ class Repository:
         with get_connection() as connection:
             connection.execute(
                 """
-                INSERT INTO scores (
-                    id, job_id, rubric_version, total, dim_role_fit, dim_domain_leverage,
-                    dim_comp_level, dim_company_stage, dim_logistics, top_reasons, rationale, scored_at
+                INSERT INTO fit_scores (
+                    id, job_id, rubric_version, total, dim_job_family_fit, dim_level_fit,
+                    dim_career_value_fit, dim_compensation_fit, dim_company_stage_fit,
+                    top_reasons, rationale, scored_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(job_id) DO UPDATE SET
                     rubric_version = excluded.rubric_version,
                     total = excluded.total,
-                    dim_role_fit = excluded.dim_role_fit,
-                    dim_domain_leverage = excluded.dim_domain_leverage,
-                    dim_comp_level = excluded.dim_comp_level,
-                    dim_company_stage = excluded.dim_company_stage,
-                    dim_logistics = excluded.dim_logistics,
+                    dim_job_family_fit = excluded.dim_job_family_fit,
+                    dim_level_fit = excluded.dim_level_fit,
+                    dim_career_value_fit = excluded.dim_career_value_fit,
+                    dim_compensation_fit = excluded.dim_compensation_fit,
+                    dim_company_stage_fit = excluded.dim_company_stage_fit,
                     top_reasons = excluded.top_reasons,
                     rationale = excluded.rationale,
                     scored_at = excluded.scored_at
@@ -138,23 +228,80 @@ class Repository:
                     job_id,
                     rubric_version,
                     payload.total,
-                    payload.dim_role_fit,
-                    payload.dim_domain_leverage,
-                    payload.dim_comp_level,
-                    payload.dim_company_stage,
-                    payload.dim_logistics,
+                    payload.dim_job_family_fit,
+                    payload.dim_level_fit,
+                    payload.dim_career_value_fit,
+                    payload.dim_compensation_fit,
+                    payload.dim_company_stage_fit,
                     json.dumps(payload.top_reasons),
                     payload.rationale,
                     _serialize_datetime(now),
                 ),
             )
-            row = connection.execute("SELECT * FROM scores WHERE job_id = ?", (job_id,)).fetchone()
+            row = connection.execute("SELECT * FROM fit_scores WHERE job_id = ?", (job_id,)).fetchone()
         return self._row_to_score(row)
 
     def get_score(self, job_id: str) -> ScoreRecord | None:
         with get_connection() as connection:
-            row = connection.execute("SELECT * FROM scores WHERE job_id = ?", (job_id,)).fetchone()
+            row = connection.execute("SELECT * FROM fit_scores WHERE job_id = ?", (job_id,)).fetchone()
         return self._row_to_score(row) if row else None
+
+    def get_active_profile(self) -> UserProfile:
+        with get_connection() as connection:
+            row = connection.execute("SELECT * FROM profiles WHERE id = ?", (DEFAULT_PROFILE_ID,)).fetchone()
+            if not row:
+                connection.execute(
+                    """
+                    INSERT INTO profiles (
+                        id, primary_job_family, seniority_level, years_experience_bucket,
+                        compensation_floor, company_stage_preference, career_priority, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        DEFAULT_PROFILE.id,
+                        DEFAULT_PROFILE.primary_job_family,
+                        DEFAULT_PROFILE.seniority_level,
+                        DEFAULT_PROFILE.years_experience_bucket,
+                        DEFAULT_PROFILE.compensation_floor,
+                        DEFAULT_PROFILE.company_stage_preference,
+                        DEFAULT_PROFILE.career_priority,
+                        _serialize_datetime(DEFAULT_PROFILE.updated_at),
+                    ),
+                )
+                row = connection.execute("SELECT * FROM profiles WHERE id = ?", (DEFAULT_PROFILE_ID,)).fetchone()
+        return self._row_to_profile(row)
+
+    def save_active_profile(self, payload: UserProfileUpdate) -> UserProfile:
+        now = _utc_now()
+        with get_connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO profiles (
+                    id, primary_job_family, seniority_level, years_experience_bucket,
+                    compensation_floor, company_stage_preference, career_priority, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    primary_job_family = excluded.primary_job_family,
+                    seniority_level = excluded.seniority_level,
+                    years_experience_bucket = excluded.years_experience_bucket,
+                    compensation_floor = excluded.compensation_floor,
+                    company_stage_preference = excluded.company_stage_preference,
+                    career_priority = excluded.career_priority,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    DEFAULT_PROFILE_ID,
+                    payload.primary_job_family,
+                    payload.seniority_level,
+                    payload.years_experience_bucket,
+                    payload.compensation_floor,
+                    payload.company_stage_preference,
+                    payload.career_priority,
+                    _serialize_datetime(now),
+                ),
+            )
+            row = connection.execute("SELECT * FROM profiles WHERE id = ?", (DEFAULT_PROFILE_ID,)).fetchone()
+        return self._row_to_profile(row)
 
     def list_jobs(
         self,
@@ -170,6 +317,11 @@ class Repository:
         action_statuses: list[str] | None = None,
         sort: str = "top",
         limit: int = 200,
+        max_years_required: int | None = None,
+        min_compensation: int | None = None,
+        seniority_levels: list[str] | None = None,
+        company_stages: list[str] | None = None,
+        hide_unknown_compensation: bool = False,
     ) -> list[JobSummary]:
         q_terms = [term.strip().lower() for term in (q or "").split() if term.strip()]
         relevance_parts: list[str] = []
@@ -198,22 +350,40 @@ class Repository:
                 j.jd_text,
                 j.jd_url,
                 j.posted_at,
+                j.salary_min,
+                j.salary_max,
+                j.salary_currency,
+                j.salary_period,
                 j.ingested_at,
                 s.id AS score_id,
                 s.rubric_version,
                 s.total,
-                s.dim_role_fit,
-                s.dim_domain_leverage,
-                s.dim_comp_level,
-                s.dim_company_stage,
-                s.dim_logistics,
+                s.dim_job_family_fit,
+                s.dim_level_fit,
+                s.dim_career_value_fit,
+                s.dim_compensation_fit,
+                s.dim_company_stage_fit,
                 s.top_reasons,
                 s.rationale,
                 s.scored_at,
+                a.job_family,
+                a.seniority_level AS attr_seniority_level,
+                a.years_required_min,
+                a.years_required_max,
+                a.compensation_known,
+                a.compensation_min,
+                a.compensation_max,
+                a.compensation_currency,
+                a.compensation_period,
+                a.company_stage,
+                a.learning_signal,
+                a.ownership_signal,
+                a.extracted_at,
                 COALESCE(latest_action.type, 'unreviewed') AS latest_action_status,
                 {relevance_expr} AS relevance_score
             FROM jobs j
-            JOIN scores s ON s.job_id = j.id
+            JOIN fit_scores s ON s.job_id = j.id
+            JOIN job_attributes a ON a.job_id = j.id
             LEFT JOIN (
                 SELECT a.job_id, a.type, a.created_at
                 FROM actions a
@@ -240,7 +410,6 @@ class Repository:
         effective_remote_policies = [policy for policy in (remote_policies or []) if policy]
         if remote_only and "remote" not in effective_remote_policies:
             effective_remote_policies.append("remote")
-
         if effective_remote_policies:
             placeholders = ", ".join("?" for _ in effective_remote_policies)
             query += f" AND j.remote_policy IN ({placeholders})"
@@ -260,9 +429,8 @@ class Repository:
 
         if location:
             for term in [part.strip().lower() for part in location.split() if part.strip()]:
-                pattern = f"%{term}%"
                 query += " AND lower(j.location) LIKE ?"
-                params.append(pattern)
+                params.append(f"%{term}%")
 
         if q_terms:
             for term in q_terms:
@@ -284,10 +452,42 @@ class Repository:
                         params.append(status)
                 query += f" AND ({' OR '.join(status_parts)})"
 
+        if max_years_required is not None:
+            query += (
+                " AND (a.years_required_min IS NULL OR a.years_required_min <= ?)"
+            )
+            params.append(max_years_required)
+
+        if min_compensation is not None:
+            if hide_unknown_compensation:
+                query += (
+                    " AND a.compensation_known = 1"
+                    " AND COALESCE(a.compensation_max, a.compensation_min, 0) >= ?"
+                )
+                params.append(min_compensation)
+            else:
+                query += (
+                    " AND (a.compensation_known = 0"
+                    " OR COALESCE(a.compensation_max, a.compensation_min, 0) >= ?)"
+                )
+                params.append(min_compensation)
+        elif hide_unknown_compensation:
+            query += " AND a.compensation_known = 1"
+
+        normalized_seniority = [item for item in (seniority_levels or []) if item]
+        if normalized_seniority:
+            placeholders = ", ".join("?" for _ in normalized_seniority)
+            query += f" AND a.seniority_level IN ({placeholders})"
+            params.extend(normalized_seniority)
+
+        normalized_stages = [item for item in (company_stages or []) if item]
+        if normalized_stages:
+            placeholders = ", ".join("?" for _ in normalized_stages)
+            query += f" AND a.company_stage IN ({placeholders})"
+            params.extend(normalized_stages)
+
         if sort == "newest":
             query += " ORDER BY COALESCE(j.posted_at, '') DESC, s.total DESC, j.ingested_at DESC"
-        elif sort == "company":
-            query += " ORDER BY j.company COLLATE NOCASE ASC, s.total DESC, j.ingested_at DESC"
         elif sort == "recent":
             query += " ORDER BY j.ingested_at DESC, s.total DESC"
         elif sort == "relevance" and q_terms:
@@ -311,7 +511,7 @@ class Repository:
                 """
                 SELECT DISTINCT j.company
                 FROM jobs j
-                JOIN scores s ON s.job_id = j.id
+                JOIN fit_scores s ON s.job_id = j.id
                 ORDER BY j.company COLLATE NOCASE ASC
                 """
             ).fetchall()
@@ -327,11 +527,12 @@ class Repository:
                     j.company,
                     j.title
                 FROM jobs j
-                JOIN scores s ON s.job_id = j.id
+                JOIN fit_scores s ON s.job_id = j.id
                 WHERE lower(j.company) LIKE '%leena%'
                   AND (
                     lower(j.title) LIKE '%entrepreneur in residence%'
                     OR lower(j.title) LIKE '%eir%'
+                    OR lower(j.title) LIKE '%strategy & operations%'
                   )
                 ORDER BY s.total DESC, s.scored_at DESC
                 LIMIT 1
@@ -347,7 +548,12 @@ class Repository:
             matched_company=row["company"],
         )
 
-    def get_job_detail(self, job_id: str) -> JobDetail | None:
+    def get_job(self, job_id: str) -> JobRecord | None:
+        with get_connection() as connection:
+            row = connection.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        return self._row_to_job(row) if row else None
+
+    def get_job_detail(self, job_id: str):
         with get_connection() as connection:
             row = connection.execute(
                 """
@@ -362,21 +568,39 @@ class Repository:
                     j.jd_text,
                     j.jd_url,
                     j.posted_at,
+                    j.salary_min,
+                    j.salary_max,
+                    j.salary_currency,
+                    j.salary_period,
                     j.ingested_at,
                     s.id AS score_id,
                     s.rubric_version,
                     s.total,
-                    s.dim_role_fit,
-                    s.dim_domain_leverage,
-                    s.dim_comp_level,
-                    s.dim_company_stage,
-                    s.dim_logistics,
+                    s.dim_job_family_fit,
+                    s.dim_level_fit,
+                    s.dim_career_value_fit,
+                    s.dim_compensation_fit,
+                    s.dim_company_stage_fit,
                     s.top_reasons,
                     s.rationale,
                     s.scored_at,
+                    a.job_family,
+                    a.seniority_level AS attr_seniority_level,
+                    a.years_required_min,
+                    a.years_required_max,
+                    a.compensation_known,
+                    a.compensation_min,
+                    a.compensation_max,
+                    a.compensation_currency,
+                    a.compensation_period,
+                    a.company_stage,
+                    a.learning_signal,
+                    a.ownership_signal,
+                    a.extracted_at,
                     COALESCE(latest_action.type, 'unreviewed') AS latest_action_status
                 FROM jobs j
-                JOIN scores s ON s.job_id = j.id
+                JOIN fit_scores s ON s.job_id = j.id
+                JOIN job_attributes a ON a.job_id = j.id
                 LEFT JOIN (
                     SELECT a.job_id, a.type, a.created_at
                     FROM actions a
@@ -397,7 +621,13 @@ class Repository:
             return None
 
         summary = self._row_to_summary(row)
-        return JobDetail(**summary.model_dump(), jd_text=row["jd_text"], actions=self.list_actions(job_id))
+        return JobDetail.model_validate(
+            {
+                **summary.model_dump(),
+                "jd_text": row["jd_text"],
+                "actions": [action.model_dump() for action in self.list_actions(job_id)],
+            }
+        )
 
     def add_action(self, job_id: str, action_type: ActionType, metadata: dict[str, Any]) -> ActionRecord:
         action_id = str(uuid.uuid4())
@@ -475,7 +705,29 @@ class Repository:
             jd_text=row["jd_text"],
             jd_url=row["jd_url"],
             posted_at=_parse_datetime(row["posted_at"]),
+            salary_min=row["salary_min"],
+            salary_max=row["salary_max"],
+            salary_currency=row["salary_currency"],
+            salary_period=row["salary_period"],
             ingested_at=_parse_datetime(row["ingested_at"]) or _utc_now(),
+        )
+
+    def _row_to_attributes(self, row) -> JobAttributeRecord:
+        return JobAttributeRecord(
+            job_id=row["job_id"],
+            job_family=row["job_family"],
+            seniority_level=row["seniority_level"],
+            years_required_min=row["years_required_min"],
+            years_required_max=row["years_required_max"],
+            compensation_known=bool(row["compensation_known"]),
+            compensation_min=row["compensation_min"],
+            compensation_max=row["compensation_max"],
+            compensation_currency=row["compensation_currency"],
+            compensation_period=row["compensation_period"],
+            company_stage=row["company_stage"],
+            learning_signal=row["learning_signal"],
+            ownership_signal=row["ownership_signal"],
+            extracted_at=_parse_datetime(row["extracted_at"]) or _utc_now(),
         )
 
     def _row_to_score(self, row) -> ScoreRecord:
@@ -484,14 +736,26 @@ class Repository:
             job_id=row["job_id"],
             rubric_version=row["rubric_version"],
             total=row["total"],
-            dim_role_fit=row["dim_role_fit"],
-            dim_domain_leverage=row["dim_domain_leverage"],
-            dim_comp_level=row["dim_comp_level"],
-            dim_company_stage=row["dim_company_stage"],
-            dim_logistics=row["dim_logistics"],
+            dim_job_family_fit=row["dim_job_family_fit"],
+            dim_level_fit=row["dim_level_fit"],
+            dim_career_value_fit=row["dim_career_value_fit"],
+            dim_compensation_fit=row["dim_compensation_fit"],
+            dim_company_stage_fit=row["dim_company_stage_fit"],
             top_reasons=json.loads(row["top_reasons"]),
             rationale=row["rationale"],
             scored_at=_parse_datetime(row["scored_at"]) or _utc_now(),
+        )
+
+    def _row_to_profile(self, row) -> UserProfile:
+        return UserProfile(
+            id=row["id"],
+            primary_job_family=row["primary_job_family"],
+            seniority_level=row["seniority_level"],
+            years_experience_bucket=row["years_experience_bucket"],
+            compensation_floor=row["compensation_floor"],
+            company_stage_preference=row["company_stage_preference"],
+            career_priority=row["career_priority"],
+            updated_at=_parse_datetime(row["updated_at"]) or _utc_now(),
         )
 
     def _row_to_action(self, row) -> ActionRecord:
@@ -504,20 +768,6 @@ class Repository:
         )
 
     def _row_to_summary(self, row) -> JobSummary:
-        score = ScoreRecord(
-            id=row["score_id"],
-            job_id=row["job_id"],
-            rubric_version=row["rubric_version"],
-            total=row["total"],
-            dim_role_fit=row["dim_role_fit"],
-            dim_domain_leverage=row["dim_domain_leverage"],
-            dim_comp_level=row["dim_comp_level"],
-            dim_company_stage=row["dim_company_stage"],
-            dim_logistics=row["dim_logistics"],
-            top_reasons=json.loads(row["top_reasons"]),
-            rationale=row["rationale"],
-            scored_at=_parse_datetime(row["scored_at"]) or _utc_now(),
-        )
         return JobSummary(
             id=row["job_id"],
             source=row["source"],
@@ -529,5 +779,34 @@ class Repository:
             posted_at=_parse_datetime(row["posted_at"]),
             ingested_at=_parse_datetime(row["ingested_at"]) or _utc_now(),
             latest_action_status=row["latest_action_status"] or "unreviewed",
-            score=score,
+            score=ScoreRecord(
+                id=row["score_id"],
+                job_id=row["job_id"],
+                rubric_version=row["rubric_version"],
+                total=row["total"],
+                dim_job_family_fit=row["dim_job_family_fit"],
+                dim_level_fit=row["dim_level_fit"],
+                dim_career_value_fit=row["dim_career_value_fit"],
+                dim_compensation_fit=row["dim_compensation_fit"],
+                dim_company_stage_fit=row["dim_company_stage_fit"],
+                top_reasons=json.loads(row["top_reasons"]),
+                rationale=row["rationale"],
+                scored_at=_parse_datetime(row["scored_at"]) or _utc_now(),
+            ),
+            attributes=JobAttributeRecord(
+                job_id=row["job_id"],
+                job_family=row["job_family"],
+                seniority_level=row["attr_seniority_level"],
+                years_required_min=row["years_required_min"],
+                years_required_max=row["years_required_max"],
+                compensation_known=bool(row["compensation_known"]),
+                compensation_min=row["compensation_min"],
+                compensation_max=row["compensation_max"],
+                compensation_currency=row["compensation_currency"],
+                compensation_period=row["compensation_period"],
+                company_stage=row["company_stage"],
+                learning_signal=row["learning_signal"],
+                ownership_signal=row["ownership_signal"],
+                extracted_at=_parse_datetime(row["extracted_at"]) or _utc_now(),
+            ),
         )

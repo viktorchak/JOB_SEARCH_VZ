@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { BookmarkPlus, ExternalLink, Mail, Sparkles, XCircle } from "lucide-react";
 
 import { ScoreBadge } from "@/components/score-badge";
-import type { JobSummary } from "@/lib/api";
+import type { JobFamily, JobSummary } from "@/lib/api";
 
 type DetailMode = "view" | "email" | "dismiss";
 
@@ -35,6 +35,31 @@ function ActionButton({
       {children}
     </button>
   );
+}
+
+function familyLabel(value: JobFamily) {
+  const labels: Record<JobFamily, string> = {
+    product_management: "Product",
+    strategy_operations: "Strategy & Ops",
+    engineering: "Engineering",
+    program_management: "Program Mgmt",
+    business_operations: "BizOps",
+    partnerships_bd: "Partnerships",
+    data_analytics: "Data / Analytics",
+    design: "Design",
+    sales_gtm: "Sales / GTM",
+    non_technical_other: "Other",
+    unknown: "Unknown",
+  };
+  return labels[value];
+}
+
+function compensationSnippet(job: JobSummary) {
+  if (!job.attributes.compensation_known) return "Comp unknown";
+  const formatter = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  const min = job.attributes.compensation_min ? formatter.format(job.attributes.compensation_min) : null;
+  const max = job.attributes.compensation_max ? formatter.format(job.attributes.compensation_max) : null;
+  return min && max ? `${min} - ${max}` : min ?? max ?? "Comp unknown";
 }
 
 export function JobResultsList({
@@ -88,7 +113,7 @@ export function JobResultsList({
                     <div className="mb-3 flex items-center gap-3">
                       <ScoreBadge score={job.score.total} />
                       <span className="font-ui rounded-full bg-slate-100 px-3 py-1 text-xs capitalize text-slate-600">
-                        {job.source}
+                        {familyLabel(job.attributes.job_family)}
                       </span>
                       <span className="font-ui rounded-full bg-teal-50 px-3 py-1 text-xs capitalize text-teal-900">
                         {job.remote_policy}
@@ -100,6 +125,9 @@ export function JobResultsList({
                     </h2>
                     <p className="font-ui mt-1 text-sm text-slate-600">
                       {job.company} • {job.location}
+                    </p>
+                    <p className="font-ui mt-2 text-xs uppercase tracking-[0.28em] text-slate-400">
+                      {job.source} • {compensationSnippet(job)}
                     </p>
                     <p className="font-display mt-4 line-clamp-3 text-[15px] leading-7 text-slate-700">
                       {job.score.top_reasons[0]}

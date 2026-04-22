@@ -18,9 +18,16 @@ from app.services.connectors.common import (
 LOGGER = logging.getLogger(__name__)
 
 SEARCH_QUERIES = [
-    "product manager OR strategy and operations",
-    "chief of staff OR entrepreneur in residence",
-    "general manager OR program manager OR business operations",
+    "product management",
+    "strategy and operations",
+    "engineering",
+    "program management",
+    "business operations",
+    "partnerships",
+    "data analytics",
+    "design",
+    "sales",
+    "finance OR recruiting OR customer success",
 ]
 
 
@@ -71,6 +78,10 @@ class JSearchConnector:
                         jd_text=description,
                         jd_url=(item.get("job_apply_link") or item.get("job_google_link") or "").strip(),
                         posted_at=parse_datetime(item.get("job_posted_at_datetime_utc")),
+                        salary_min=item.get("job_min_salary"),
+                        salary_max=item.get("job_max_salary"),
+                        salary_currency=item.get("job_salary_currency"),
+                        salary_period=item.get("job_salary_period"),
                     )
                 )
 
@@ -84,7 +95,7 @@ class JSearchConnector:
                 response = client.get(
                     "https://jsearch.p.rapidapi.com/search",
                     params={
-                        "query": f"{query} in United States",
+                        "query": query,
                         "page": str(page),
                         "num_pages": "1",
                         "date_posted": "month",
@@ -109,14 +120,8 @@ class JSearchConnector:
         jobs: list[JobIngest] = []
         seen: set[str] = set()
 
-        role_suffixes = [
-            "product manager OR strategy operations",
-            "chief of staff OR program manager OR business operations",
-        ]
-        queries = [f"{query} {suffix}" for suffix in role_suffixes]
-
         all_items: list[dict] = []
-        for q in queries:
+        for q in [query, f"{query} jobs"]:
             try:
                 all_items.extend(self._search(q, num_pages=1))
             except Exception:
@@ -150,6 +155,10 @@ class JSearchConnector:
                     jd_text=description,
                     jd_url=(item.get("job_apply_link") or item.get("job_google_link") or "").strip(),
                     posted_at=parse_datetime(item.get("job_posted_at_datetime_utc")),
+                    salary_min=item.get("job_min_salary"),
+                    salary_max=item.get("job_max_salary"),
+                    salary_currency=item.get("job_salary_currency"),
+                    salary_period=item.get("job_salary_period"),
                 )
             )
 

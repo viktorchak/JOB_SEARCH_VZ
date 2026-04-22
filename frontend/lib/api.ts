@@ -4,20 +4,83 @@ export type RemotePolicy = "remote" | "hybrid" | "onsite" | "unknown";
 export type ActionType = "applied" | "emailed" | "dismissed" | "saved";
 export type ActionStatus = ActionType | "unreviewed";
 export type ConnectorName = "remotive" | "remoteok" | "jobicy" | "jsearch" | "greenhouse" | "lever" | "leena";
+export type JobFamily =
+  | "product_management"
+  | "strategy_operations"
+  | "engineering"
+  | "program_management"
+  | "business_operations"
+  | "partnerships_bd"
+  | "data_analytics"
+  | "design"
+  | "sales_gtm"
+  | "non_technical_other"
+  | "unknown";
+export type PrimaryJobFamily = Exclude<JobFamily, "unknown">;
+export type SeniorityLevel =
+  | "internship"
+  | "entry_level"
+  | "associate"
+  | "mid_senior"
+  | "director"
+  | "executive"
+  | "unknown";
+export type ProfileSeniority = Exclude<SeniorityLevel, "unknown">;
+export type YearsExperienceBucket = "0-1" | "2-4" | "5-7" | "8-10" | "10+";
+export type CompanyStage = "startup" | "growth" | "late_stage" | "public" | "unknown";
+export type CompanyStagePreference = CompanyStage | "no_preference";
+export type CareerPriority = "learning" | "balanced" | "ownership_scope";
 
 export interface ScoreRecord {
   id: string;
   job_id: string;
   rubric_version: string;
   total: number;
-  dim_role_fit: number;
-  dim_domain_leverage: number;
-  dim_comp_level: number;
-  dim_company_stage: number;
-  dim_logistics: number;
+  dim_job_family_fit: number;
+  dim_level_fit: number;
+  dim_career_value_fit: number;
+  dim_compensation_fit: number;
+  dim_company_stage_fit: number;
   top_reasons: string[];
   rationale: string;
   scored_at: string;
+}
+
+export interface JobAttributes {
+  job_id: string;
+  job_family: JobFamily;
+  seniority_level: SeniorityLevel;
+  years_required_min: number | null;
+  years_required_max: number | null;
+  compensation_known: boolean;
+  compensation_min: number | null;
+  compensation_max: number | null;
+  compensation_currency: string | null;
+  compensation_period: string | null;
+  company_stage: CompanyStage;
+  learning_signal: number;
+  ownership_signal: number;
+  extracted_at: string;
+}
+
+export interface UserProfile {
+  id: string;
+  primary_job_family: PrimaryJobFamily;
+  seniority_level: ProfileSeniority;
+  years_experience_bucket: YearsExperienceBucket;
+  compensation_floor: number | null;
+  company_stage_preference: CompanyStagePreference;
+  career_priority: CareerPriority;
+  updated_at: string;
+}
+
+export interface UserProfileUpdate {
+  primary_job_family: PrimaryJobFamily;
+  seniority_level: ProfileSeniority;
+  years_experience_bucket: YearsExperienceBucket;
+  compensation_floor: number | null;
+  company_stage_preference: CompanyStagePreference;
+  career_priority: CareerPriority;
 }
 
 export interface JobSummary {
@@ -32,6 +95,7 @@ export interface JobSummary {
   ingested_at: string;
   latest_action_status: ActionStatus;
   score: ScoreRecord;
+  attributes: JobAttributes;
 }
 
 export interface ActionRecord {
@@ -68,6 +132,7 @@ export interface JobListResponse {
   items: JobSummary[];
   total: number;
   companies: string[];
+  profile: UserProfile;
   verification: {
     leena_eir_present: boolean;
     matched_job_id: string | null;
@@ -81,13 +146,15 @@ export interface JobSearchFilters {
   q: string;
   location: string;
   minScore: number;
-  company: string;
-  remoteOnly: boolean;
   remotePolicies: RemotePolicy[];
-  source: ConnectorName | "";
   datePostedDays: number | null;
   actionStatus: ActionStatus | "";
-  sort: "top" | "relevance" | "newest" | "recent" | "company";
+  sort: "top" | "relevance" | "newest" | "recent";
+  maxYearsRequired: number | null;
+  minCompensation: number | null;
+  seniorityLevels: ProfileSeniority[];
+  companyStages: Exclude<CompanyStage, "unknown">[];
+  hideUnknownCompensation: boolean;
 }
 
 export interface EmailDraft {
@@ -136,6 +203,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   getHealth: () => request<HealthResponse>("/health"),
+  getProfile: () => request<UserProfile>("/profile"),
+  saveProfile: (payload: UserProfileUpdate) =>
+    request<UserProfile>("/profile", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
   getJobs: (filters: JobSearchFilters) => {
     const params = new URLSearchParams();
     if (filters.q.trim()) {
@@ -144,13 +217,15 @@ export const api = {
     }
     if (filters.location.trim()) params.set("location", filters.location.trim());
     if (filters.minScore > 0) params.set("min_score", String(filters.minScore));
-    if (filters.company) params.set("company", filters.company);
-    if (filters.remoteOnly) params.set("remote", "true");
     filters.remotePolicies.forEach((policy) => params.append("remote_policy", policy));
-    if (filters.source) params.append("source", filters.source);
     if (filters.datePostedDays) params.set("date_posted_days", String(filters.datePostedDays));
     if (filters.actionStatus) params.append("action_status", filters.actionStatus);
     if (filters.sort) params.set("sort", filters.sort);
+    if (filters.maxYearsRequired !== null) params.set("max_years_required", String(filters.maxYearsRequired));
+    if (filters.minCompensation !== null) params.set("min_compensation", String(filters.minCompensation));
+    filters.seniorityLevels.forEach((level) => params.append("seniority_level", level));
+    filters.companyStages.forEach((stage) => params.append("company_stage", stage));
+    if (filters.hideUnknownCompensation) params.set("hide_unknown_compensation", "true");
     const query = params.toString();
     return request<JobListResponse>(`/jobs${query ? `?${query}` : ""}`);
   },

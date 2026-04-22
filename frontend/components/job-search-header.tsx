@@ -1,6 +1,6 @@
 "use client";
 
-import { MapPin, RefreshCw, Search, X } from "lucide-react";
+import { RefreshCw, Search, X } from "lucide-react";
 
 import type { ConnectorStatus } from "@/lib/api";
 
@@ -12,13 +12,11 @@ function connectorTone(status: ConnectorStatus) {
 
 interface JobSearchHeaderProps {
   q: string;
-  location: string;
   googleConfigured: boolean;
   googleAuthenticated: boolean;
   refreshing: boolean;
   connectors: ConnectorStatus[];
   onQueryChange: (value: string) => void;
-  onLocationChange: (value: string) => void;
   onClearSearch: () => void;
   onConnectGoogle: () => void;
   onRefresh: () => void;
@@ -27,13 +25,11 @@ interface JobSearchHeaderProps {
 
 export function JobSearchHeader({
   q,
-  location,
   googleConfigured,
   googleAuthenticated,
   refreshing,
   connectors,
   onQueryChange,
-  onLocationChange,
   onClearSearch,
   onConnectGoogle,
   onRefresh,
@@ -63,7 +59,7 @@ export function JobSearchHeader({
               Job Search Assistant
             </h1>
             <p className="font-ui mt-3 max-w-3xl text-sm leading-7 text-slate-600 md:text-base">
-              Search live PM and Strategy &amp; Ops roles, rank them with Gemini, and take action
+              Search live jobs across broad families, rank them to your saved profile, and take action
               from one workspace.
             </p>
           </div>
@@ -91,7 +87,7 @@ export function JobSearchHeader({
       </div>
 
       <div className="rounded-[32px] border border-black/10 bg-white/80 p-4 shadow-[0_18px_60px_rgba(15,23,42,0.06)] backdrop-blur">
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1.3fr)_minmax(220px,0.7fr)_auto]">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
           <label className="font-ui flex items-center gap-3 rounded-full border border-black/10 bg-white px-4 py-3">
             <Search className="h-4 w-4 text-slate-500" />
             <input
@@ -100,7 +96,7 @@ export function JobSearchHeader({
               placeholder="Search jobs, companies, or skills"
               className="w-full bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
             />
-            {(q || location) && (
+            {q && (
               <button
                 type="button"
                 onClick={onClearSearch}
@@ -109,16 +105,6 @@ export function JobSearchHeader({
                 <X className="h-4 w-4" />
               </button>
             )}
-          </label>
-
-          <label className="font-ui flex items-center gap-3 rounded-full border border-black/10 bg-white px-4 py-3">
-            <MapPin className="h-4 w-4 text-slate-500" />
-            <input
-              value={location}
-              onChange={(event) => onLocationChange(event.target.value)}
-              placeholder="Location"
-              className="w-full bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
-            />
           </label>
 
           <div className="font-ui flex items-center rounded-full border border-black/10 bg-[#f7f4ee] px-4 py-3 text-sm text-slate-600">

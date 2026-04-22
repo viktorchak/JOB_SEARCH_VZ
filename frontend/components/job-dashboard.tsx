@@ -1,28 +1,40 @@
 "use client";
 
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import { JobDetailPane } from "@/components/job-detail-pane";
 import { JobFilterToolbar } from "@/components/job-filter-toolbar";
 import { JobResultsList } from "@/components/job-results-list";
 import { JobSearchHeader } from "@/components/job-search-header";
+import { ProfileBuilder } from "@/components/profile-builder";
 import { ToastStack, type ToastMessage } from "@/components/toast-stack";
 import {
   api,
   type ActionStatus,
-  type ConnectorName,
+  type CompanyStage,
   type HealthResponse,
   type JobDetail,
-  type JobSearchFilters,
   type JobListResponse,
+  type JobSearchFilters,
   type JobSummary,
+  type ProfileSeniority,
   type RemotePolicy,
+  type UserProfile,
+  type UserProfileUpdate,
 } from "@/lib/api";
 
 type DetailMode = "view" | "email" | "dismiss";
 type JobTab = "all" | Extract<ActionStatus, "saved" | "applied" | "dismissed">;
 
 const DISMISS_DEFAULT = "Overqualified";
+const DEFAULT_PROFILE: UserProfileUpdate = {
+  primary_job_family: "product_management",
+  seniority_level: "mid_senior",
+  years_experience_bucket: "5-7",
+  compensation_floor: null,
+  company_stage_preference: "no_preference",
+  career_priority: "balanced",
+};
 
 function formatDate(value: string | null) {
   if (!value) return "Unknown";
@@ -42,8 +54,10 @@ function toMessage(error: unknown) {
 export function JobDashboard() {
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [total, setTotal] = useState(0);
-  const [companies, setCompanies] = useState<string[]>([]);
   const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [profileDraft, setProfileDraft] = useState<UserProfileUpdate>(DEFAULT_PROFILE);
+  const [savingProfile, setSavingProfile] = useState(false);
   const [selectedJob, setSelectedJob] = useState<JobDetail | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [detailMode, setDetailMode] = useState<DetailMode>("view");
@@ -58,40 +72,60 @@ export function JobDashboard() {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   const [query, setQuery] = useState("");
-  const [locationQuery, setLocationQuery] = useState("");
+  const [locationFilter, setLocationFilter] = useState("");
   const [remotePolicy, setRemotePolicy] = useState<RemotePolicy | "">("");
   const [datePostedDays, setDatePostedDays] = useState<number | null>(null);
-  const [source, setSource] = useState<ConnectorName | "">("");
-  const [selectedCompany, setSelectedCompany] = useState("");
   const [minScore, setMinScore] = useState(60);
   const [sort, setSort] = useState<JobSearchFilters["sort"]>("top");
   const [tab, setTab] = useState<JobTab>("all");
+  const [maxYearsRequired, setMaxYearsRequired] = useState<number | null>(null);
+  const [minCompensation, setMinCompensation] = useState<number | null>(null);
+  const [seniorityFilter, setSeniorityFilter] = useState<ProfileSeniority | "">("");
+  const [companyStageFilter, setCompanyStageFilter] = useState<Exclude<CompanyStage, "unknown"> | "">("");
+  const [hideUnknownCompensation, setHideUnknownCompensation] = useState(false);
 
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => setDebouncedQuery(query), 600);
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+    debounceRef.current = setTimeout(() => setDebouncedQuery(query), 500);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
   }, [query]);
 
-  const deferredLocationQuery = useDeferredValue(locationQuery);
+  const deferredLocation = useDeferredValue(locationFilter);
 
   const filters = useMemo<JobSearchFilters>(
     () => ({
       q: debouncedQuery,
-      location: deferredLocationQuery,
+      location: deferredLocation,
       minScore,
-      company: selectedCompany,
-      remoteOnly: false,
       remotePolicies: remotePolicy ? [remotePolicy] : [],
-      source,
       datePostedDays,
       actionStatus: tab === "all" ? "" : tab,
       sort,
+      maxYearsRequired,
+      minCompensation,
+      seniorityLevels: seniorityFilter ? [seniorityFilter] : [],
+      companyStages: companyStageFilter ? [companyStageFilter] : [],
+      hideUnknownCompensation,
     }),
-    [datePostedDays, deferredLocationQuery, debouncedQuery, minScore, remotePolicy, selectedCompany, sort, source, tab],
+    [
+      companyStageFilter,
+      datePostedDays,
+      debouncedQuery,
+      deferredLocation,
+      hideUnknownCompensation,
+      maxYearsRequired,
+      minCompensation,
+      minScore,
+      remotePolicy,
+      seniorityFilter,
+      sort,
+      tab,
+    ],
   );
 
   useEffect(() => {
@@ -134,8 +168,11 @@ export function JobDashboard() {
       const response = await api.getJobs(nextFilters);
       setJobs(response.items);
       setTotal(response.total);
-      setCompanies(response.companies);
       setVerification(response.verification);
+      setProfile(response.profile);
+      setProfileDraft((current) =>
+        current === DEFAULT_PROFILE && !profile ? profileToDraft(response.profile) : current,
+      );
     } catch (error) {
       toast("error", toMessage(error));
     } finally {
@@ -148,11 +185,25 @@ export function JobDashboard() {
     try {
       await api.refresh();
       await Promise.all([loadJobs(filters), loadHealth()]);
-      toast("success", "Refreshed live connectors and rescored unscored jobs.");
+      toast("success", "Refreshed live connectors and recomputed scores for the active profile.");
     } catch (error) {
       toast("error", toMessage(error));
     } finally {
       setRefreshing(false);
+    }
+  }
+
+  async function saveProfile() {
+    setSavingProfile(true);
+    try {
+      const saved = await api.saveProfile(profileDraft);
+      setProfile(saved);
+      await loadJobs(filters);
+      toast("success", "Saved your scoring profile and reranked the corpus.");
+    } catch (error) {
+      toast("error", toMessage(error));
+    } finally {
+      setSavingProfile(false);
     }
   }
 
@@ -285,16 +336,21 @@ export function JobDashboard() {
 
   function clearSearch() {
     setQuery("");
-    setLocationQuery("");
   }
 
-  function clearFilter(key: "remote" | "date" | "source" | "company" | "score" | "tab") {
-    if (key === "remote") setRemotePolicy("");
+  function clearFilter(key: "date" | "score" | "tab" | "hard") {
     if (key === "date") setDatePostedDays(null);
-    if (key === "source") setSource("");
-    if (key === "company") setSelectedCompany("");
     if (key === "score") setMinScore(0);
     if (key === "tab") setTab("all");
+    if (key === "hard") {
+      setLocationFilter("");
+      setRemotePolicy("");
+      setMaxYearsRequired(null);
+      setMinCompensation(null);
+      setSeniorityFilter("");
+      setCompanyStageFilter("");
+      setHideUnknownCompensation(false);
+    }
   }
 
   function toast(tone: ToastMessage["tone"], message: string) {
@@ -315,13 +371,11 @@ export function JobDashboard() {
           <div className="rounded-[36px] border border-black/10 bg-[rgba(255,255,255,0.74)] p-5 shadow-[0_28px_120px_rgba(15,23,42,0.1)] backdrop-blur md:p-7">
             <JobSearchHeader
               q={query}
-              location={locationQuery}
               googleConfigured={googleConfigured}
               googleAuthenticated={googleAuthenticated}
               refreshing={refreshing}
               connectors={health?.connectors ?? []}
               onQueryChange={setQuery}
-              onLocationChange={setLocationQuery}
               onClearSearch={clearSearch}
               onConnectGoogle={connectGoogle}
               onRefresh={refreshAll}
@@ -329,23 +383,40 @@ export function JobDashboard() {
             />
 
             <div className="mt-6">
+              <ProfileBuilder
+                profile={profileDraft}
+                activeProfile={profile}
+                saving={savingProfile}
+                onChange={(key, value) => setProfileDraft((current) => ({ ...current, [key]: value }))}
+                onSave={() => void saveProfile()}
+              />
+            </div>
+
+            <div className="mt-6">
               <JobFilterToolbar
+                location={locationFilter}
                 remotePolicy={remotePolicy}
                 datePostedDays={datePostedDays}
-                source={source}
-                company={selectedCompany}
                 minScore={minScore}
                 sort={sort}
                 tab={tab}
-                companies={companies}
                 verification={verification}
+                maxYearsRequired={maxYearsRequired}
+                minCompensation={minCompensation}
+                seniorityLevel={seniorityFilter}
+                companyStage={companyStageFilter}
+                hideUnknownCompensation={hideUnknownCompensation}
+                onLocationChange={setLocationFilter}
                 onRemotePolicyChange={setRemotePolicy}
                 onDatePostedDaysChange={setDatePostedDays}
-                onSourceChange={setSource}
-                onCompanyChange={setSelectedCompany}
                 onMinScoreChange={setMinScore}
                 onSortChange={setSort}
                 onTabChange={setTab}
+                onMaxYearsRequiredChange={setMaxYearsRequired}
+                onMinCompensationChange={setMinCompensation}
+                onSeniorityLevelChange={setSeniorityFilter}
+                onCompanyStageChange={setCompanyStageFilter}
+                onHideUnknownCompensationChange={setHideUnknownCompensation}
                 onClearFilter={clearFilter}
               />
             </div>
@@ -395,4 +466,15 @@ export function JobDashboard() {
       <ToastStack items={toasts} onDismiss={dismissToast} />
     </>
   );
+}
+
+function profileToDraft(profile: UserProfile): UserProfileUpdate {
+  return {
+    primary_job_family: profile.primary_job_family,
+    seniority_level: profile.seniority_level,
+    years_experience_bucket: profile.years_experience_bucket,
+    compensation_floor: profile.compensation_floor,
+    company_stage_preference: profile.company_stage_preference,
+    career_priority: profile.career_priority,
+  };
 }

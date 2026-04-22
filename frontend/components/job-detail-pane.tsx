@@ -3,7 +3,7 @@
 import { ExternalLink, Mail, RefreshCw, Send, Sparkles } from "lucide-react";
 
 import { ScoreBadge } from "@/components/score-badge";
-import type { JobDetail } from "@/lib/api";
+import type { CompanyStage, JobDetail, JobFamily, SeniorityLevel } from "@/lib/api";
 
 type DetailMode = "view" | "email" | "dismiss";
 
@@ -32,14 +32,66 @@ interface JobDetailPaneProps {
 }
 
 const breakdownRows = [
-  ["Role fit", "dim_role_fit", 25],
-  ["Domain leverage", "dim_domain_leverage", 25],
-  ["Comp and level", "dim_comp_level", 20],
-  ["Company stage", "dim_company_stage", 20],
-  ["Logistics", "dim_logistics", 10],
+  ["Job family fit", "dim_job_family_fit", 40],
+  ["Level fit", "dim_level_fit", 25],
+  ["Career value fit", "dim_career_value_fit", 15],
+  ["Compensation fit", "dim_compensation_fit", 10],
+  ["Company stage fit", "dim_company_stage_fit", 10],
 ] as const;
 
 const dismissOptions = ["Overqualified", "Wrong domain", "Bad comp", "Location", "Other"];
+
+function familyLabel(value: JobFamily) {
+  const labels: Record<JobFamily, string> = {
+    product_management: "Product Management",
+    strategy_operations: "Strategy & Operations",
+    engineering: "Engineering",
+    program_management: "Program Management",
+    business_operations: "Business Operations",
+    partnerships_bd: "Partnerships / BD",
+    data_analytics: "Data / Analytics",
+    design: "Design",
+    sales_gtm: "Sales / GTM",
+    non_technical_other: "Non-technical / Other",
+    unknown: "Unknown",
+  };
+  return labels[value];
+}
+
+function seniorityLabel(value: SeniorityLevel) {
+  const labels: Record<SeniorityLevel, string> = {
+    internship: "Internship",
+    entry_level: "Entry level",
+    associate: "Associate",
+    mid_senior: "Mid-Senior",
+    director: "Director",
+    executive: "Executive",
+    unknown: "Unknown",
+  };
+  return labels[value];
+}
+
+function stageLabel(value: CompanyStage) {
+  const labels: Record<CompanyStage, string> = {
+    startup: "Startup",
+    growth: "Growth",
+    late_stage: "Late-stage",
+    public: "Public",
+    unknown: "Unknown",
+  };
+  return labels[value];
+}
+
+function compensationLabel(job: JobDetail) {
+  const { compensation_known, compensation_min, compensation_max, compensation_period } = job.attributes;
+  if (!compensation_known) return "Unknown";
+  const formatter = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  const min = compensation_min ? formatter.format(compensation_min) : null;
+  const max = compensation_max ? formatter.format(compensation_max) : null;
+  const suffix = compensation_period === "hour" ? "/hr" : "/yr";
+  if (min && max) return `${min} - ${max}${suffix}`;
+  return `${min ?? max}${suffix}`;
+}
 
 export function JobDetailPane({
   job,
@@ -102,9 +154,9 @@ export function JobDetailPane({
             </div>
           ) : (
             <div className="space-y-6">
-              <div className="grid gap-3 md:grid-cols-[auto_1fr_1fr]">
-                <div className="rounded-3xl border border-black/10 bg-white p-4">
-                  <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Match</p>
+                <div className="grid gap-3 md:grid-cols-[auto_1fr_1fr]">
+                  <div className="rounded-3xl border border-black/10 bg-white p-4">
+                    <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Match</p>
                   <div className="mt-3">
                     <ScoreBadge score={job.score.total} large />
                   </div>
@@ -119,7 +171,49 @@ export function JobDetailPane({
                   <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Source</p>
                   <p className="mt-3 text-xl font-semibold capitalize text-slate-900">{job.source}</p>
                 </div>
-              </div>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-3xl border border-black/10 bg-white p-4">
+                    <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Job family</p>
+                    <p className="mt-3 text-base font-semibold text-slate-900">
+                      {familyLabel(job.attributes.job_family)}
+                    </p>
+                  </div>
+                  <div className="rounded-3xl border border-black/10 bg-white p-4">
+                    <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Seniority</p>
+                    <p className="mt-3 text-base font-semibold text-slate-900">
+                      {seniorityLabel(job.attributes.seniority_level)}
+                    </p>
+                  </div>
+                  <div className="rounded-3xl border border-black/10 bg-white p-4">
+                    <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Years required</p>
+                    <p className="mt-3 text-base font-semibold text-slate-900">
+                      {job.attributes.years_required_min !== null
+                        ? `${job.attributes.years_required_min}-${job.attributes.years_required_max ?? job.attributes.years_required_min}`
+                        : "Unknown"}
+                    </p>
+                  </div>
+                  <div className="rounded-3xl border border-black/10 bg-white p-4">
+                    <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Compensation</p>
+                    <p className="mt-3 text-base font-semibold text-slate-900">{compensationLabel(job)}</p>
+                  </div>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="rounded-3xl border border-black/10 bg-white p-4">
+                    <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Company stage</p>
+                    <p className="mt-3 text-base font-semibold text-slate-900">
+                      {stageLabel(job.attributes.company_stage)}
+                    </p>
+                  </div>
+                  <div className="rounded-3xl border border-black/10 bg-white p-4">
+                    <p className="text-xs uppercase tracking-[0.25em] text-slate-500">Career signals</p>
+                    <p className="mt-3 text-base font-semibold text-slate-900">
+                      Learning {Math.round(job.attributes.learning_signal)}/10 • Ownership {Math.round(job.attributes.ownership_signal)}/10
+                    </p>
+                  </div>
+                </div>
 
               {mode === "view" && (
                 <>

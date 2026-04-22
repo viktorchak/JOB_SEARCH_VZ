@@ -10,6 +10,45 @@ ConnectorName = Literal["remotive", "remoteok", "jobicy", "jsearch", "greenhouse
 RemotePolicy = Literal["remote", "hybrid", "onsite", "unknown"]
 ActionType = Literal["applied", "emailed", "dismissed", "saved"]
 ActionStatus = Literal["applied", "emailed", "dismissed", "saved", "unreviewed"]
+JobFamily = Literal[
+    "product_management",
+    "strategy_operations",
+    "engineering",
+    "program_management",
+    "business_operations",
+    "partnerships_bd",
+    "data_analytics",
+    "design",
+    "sales_gtm",
+    "non_technical_other",
+    "unknown",
+]
+PrimaryJobFamily = Literal[
+    "product_management",
+    "strategy_operations",
+    "engineering",
+    "program_management",
+    "business_operations",
+    "partnerships_bd",
+    "data_analytics",
+    "design",
+    "sales_gtm",
+    "non_technical_other",
+]
+SeniorityLevel = Literal[
+    "internship",
+    "entry_level",
+    "associate",
+    "mid_senior",
+    "director",
+    "executive",
+    "unknown",
+]
+ProfileSeniority = Literal["internship", "entry_level", "associate", "mid_senior", "director", "executive"]
+YearsExperienceBucket = Literal["0-1", "2-4", "5-7", "8-10", "10+"]
+CompanyStage = Literal["startup", "growth", "late_stage", "public", "unknown"]
+CompanyStagePreference = Literal["startup", "growth", "late_stage", "public", "no_preference"]
+CareerPriority = Literal["learning", "balanced", "ownership_scope"]
 
 
 class JobIngest(BaseModel):
@@ -22,6 +61,10 @@ class JobIngest(BaseModel):
     jd_text: str
     jd_url: str
     posted_at: datetime | None = None
+    salary_min: float | None = None
+    salary_max: float | None = None
+    salary_currency: str | None = None
+    salary_period: str | None = None
 
     @field_validator("external_id", "company", "title", "location", "jd_text", "jd_url")
     @classmethod
@@ -37,13 +80,50 @@ class JobRecord(JobIngest):
     ingested_at: datetime
 
 
+class JobAttributeRecord(BaseModel):
+    job_id: str
+    job_family: JobFamily
+    seniority_level: SeniorityLevel
+    years_required_min: int | None = Field(default=None, ge=0, le=50)
+    years_required_max: int | None = Field(default=None, ge=0, le=50)
+    compensation_known: bool = False
+    compensation_min: float | None = Field(default=None, ge=0)
+    compensation_max: float | None = Field(default=None, ge=0)
+    compensation_currency: str | None = None
+    compensation_period: str | None = None
+    company_stage: CompanyStage = "unknown"
+    learning_signal: float = Field(default=0, ge=0, le=10)
+    ownership_signal: float = Field(default=0, ge=0, le=10)
+    extracted_at: datetime
+
+
+class UserProfile(BaseModel):
+    id: str
+    primary_job_family: PrimaryJobFamily
+    seniority_level: ProfileSeniority
+    years_experience_bucket: YearsExperienceBucket
+    compensation_floor: int | None = Field(default=None, ge=0)
+    company_stage_preference: CompanyStagePreference = "no_preference"
+    career_priority: CareerPriority = "balanced"
+    updated_at: datetime
+
+
+class UserProfileUpdate(BaseModel):
+    primary_job_family: PrimaryJobFamily
+    seniority_level: ProfileSeniority
+    years_experience_bucket: YearsExperienceBucket
+    compensation_floor: int | None = Field(default=None, ge=0)
+    company_stage_preference: CompanyStagePreference = "no_preference"
+    career_priority: CareerPriority = "balanced"
+
+
 class ScorePayload(BaseModel):
     total: float = Field(ge=0, le=100)
-    dim_role_fit: float = Field(ge=0, le=25)
-    dim_domain_leverage: float = Field(ge=0, le=25)
-    dim_comp_level: float = Field(ge=0, le=20)
-    dim_company_stage: float = Field(ge=0, le=20)
-    dim_logistics: float = Field(ge=0, le=10)
+    dim_job_family_fit: float = Field(ge=0, le=40)
+    dim_level_fit: float = Field(ge=0, le=25)
+    dim_career_value_fit: float = Field(ge=0, le=15)
+    dim_compensation_fit: float = Field(ge=0, le=10)
+    dim_company_stage_fit: float = Field(ge=0, le=10)
     top_reasons: list[str] = Field(min_length=3, max_length=3)
     rationale: str = Field(min_length=10)
 
@@ -92,6 +172,7 @@ class JobSummary(BaseModel):
     ingested_at: datetime
     latest_action_status: ActionStatus = "unreviewed"
     score: ScoreRecord
+    attributes: JobAttributeRecord
 
 
 class JobDetail(JobSummary):
@@ -112,6 +193,7 @@ class JobListResponse(BaseModel):
     total: int
     companies: list[str]
     verification: VerificationStatus
+    profile: UserProfile
 
 
 class ConnectorStatus(BaseModel):

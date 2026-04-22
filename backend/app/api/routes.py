@@ -15,6 +15,8 @@ from app.schemas import (
     JobDetail,
     JobListResponse,
     ScoreBatchResponse,
+    UserProfile,
+    UserProfileUpdate,
 )
 from app.services.google import GoogleService
 from app.services.ingestion import IngestionService
@@ -78,6 +80,18 @@ def score() -> ScoreBatchResponse:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/profile", response_model=UserProfile)
+def get_profile() -> UserProfile:
+    return repository.get_active_profile()
+
+
+@router.put("/profile", response_model=UserProfile)
+def update_profile(request: UserProfileUpdate) -> UserProfile:
+    profile = repository.save_active_profile(request)
+    scoring_service.rescore_active_profile()
+    return profile
+
+
 @router.get("/jobs", response_model=JobListResponse)
 def list_jobs(
     q: str | None = Query(default=None),
@@ -93,6 +107,11 @@ def list_jobs(
     sort: str = Query(default="top"),
     limit: int = Query(default=200, ge=1, le=500),
     live_search: bool = Query(default=False),
+    max_years_required: int | None = Query(default=None, ge=0, le=50),
+    min_compensation: int | None = Query(default=None, ge=0),
+    seniority_level: list[str] = Query(default=[]),
+    company_stage: list[str] = Query(default=[]),
+    hide_unknown_compensation: bool = Query(default=False),
 ) -> JobListResponse:
     if live_search and q and q.strip() and get_settings().jsearch_api_key:
         _ingest_live_jsearch(q.strip())
@@ -110,14 +129,21 @@ def list_jobs(
         action_statuses=action_status,
         sort=sort,
         limit=limit,
+        max_years_required=max_years_required,
+        min_compensation=min_compensation,
+        seniority_levels=seniority_level,
+        company_stages=company_stage,
+        hide_unknown_compensation=hide_unknown_compensation,
     )
     companies = repository.list_companies()
     verification = repository.leena_verification_status()
+    profile = repository.get_active_profile()
     return JobListResponse(
         items=items,
         total=len(items),
         companies=companies,
         verification=verification,
+        profile=profile,
     )
 
 
@@ -131,12 +157,10 @@ def _ingest_live_jsearch(query: str) -> None:
         return
     for job in jobs:
         record, _ = repository.upsert_job(job)
-        if not repository.get_score(record.id):
-            try:
-                score = scoring_service.score_job(record)
-                repository.save_score(record.id, get_settings().rubric_version, score)
-            except Exception:
-                pass
+        try:
+            scoring_service.ensure_job_scored(record)
+        except Exception:
+            pass
 
 
 @router.get("/jobs/{job_id}", response_model=JobDetail)
