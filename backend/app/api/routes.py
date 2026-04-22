@@ -92,7 +92,11 @@ def list_jobs(
     action_status: list[str] = Query(default=[]),
     sort: str = Query(default="top"),
     limit: int = Query(default=200, ge=1, le=500),
+    live_search: bool = Query(default=False),
 ) -> JobListResponse:
+    if live_search and q and q.strip() and get_settings().jsearch_api_key:
+        _ingest_live_jsearch(q.strip())
+
     items = repository.list_jobs(
         q=q,
         location=location,
@@ -115,6 +119,24 @@ def list_jobs(
         companies=companies,
         verification=verification,
     )
+
+
+def _ingest_live_jsearch(query: str) -> None:
+    from app.services.connectors.jsearch import JSearchConnector
+
+    connector = JSearchConnector()
+    try:
+        jobs = connector.search_on_demand(query)
+    except Exception:
+        return
+    for job in jobs:
+        record, _ = repository.upsert_job(job)
+        if not repository.get_score(record.id):
+            try:
+                score = scoring_service.score_job(record)
+                repository.save_score(record.id, get_settings().rubric_version, score)
+            except Exception:
+                pass
 
 
 @router.get("/jobs/{job_id}", response_model=JobDetail)

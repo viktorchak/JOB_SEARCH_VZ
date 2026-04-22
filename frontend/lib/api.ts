@@ -138,7 +138,10 @@ export const api = {
   getHealth: () => request<HealthResponse>("/health"),
   getJobs: (filters: JobSearchFilters) => {
     const params = new URLSearchParams();
-    if (filters.q.trim()) params.set("q", filters.q.trim());
+    if (filters.q.trim()) {
+      params.set("q", filters.q.trim());
+      params.set("live_search", "true");
+    }
     if (filters.location.trim()) params.set("location", filters.location.trim());
     if (filters.minScore > 0) params.set("min_score", String(filters.minScore));
     if (filters.company) params.set("company", filters.company);

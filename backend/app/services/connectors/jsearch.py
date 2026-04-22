@@ -102,6 +102,49 @@ class JSearchConnector:
                     break
         return all_items
 
+    def search_on_demand(self, query: str) -> list[JobIngest]:
+        if not self.api_key:
+            raise RuntimeError("JSEARCH_API_KEY is not configured")
+
+        jobs: list[JobIngest] = []
+        seen: set[str] = set()
+
+        try:
+            items = self._search(query, num_pages=1)
+        except Exception:
+            LOGGER.exception("jsearch on-demand search failed", extra={"query": query})
+            return jobs
+
+        for item in items:
+            job_id = item.get("job_id") or ""
+            if not job_id or job_id in seen:
+                continue
+            seen.add(job_id)
+
+            title = (item.get("job_title") or "").strip()
+            description = clean_html_to_text(item.get("job_description") or "")
+            if not matches_target_role(title, None, description):
+                continue
+
+            location = self._build_location(item)
+            remote_flag = item.get("job_is_remote") is True
+
+            jobs.append(
+                JobIngest(
+                    source="jsearch",
+                    external_id=job_id,
+                    company=(item.get("employer_name") or "Unknown").strip(),
+                    title=title,
+                    location=location,
+                    remote_policy="remote" if remote_flag else classify_remote(location, title, description),
+                    jd_text=description,
+                    jd_url=(item.get("job_apply_link") or item.get("job_google_link") or "").strip(),
+                    posted_at=parse_datetime(item.get("job_posted_at_datetime_utc")),
+                )
+            )
+
+        return jobs
+
     @staticmethod
     def _build_location(item: dict) -> str:
         city = (item.get("job_city") or "").strip()
