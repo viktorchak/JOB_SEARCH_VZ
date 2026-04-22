@@ -1,23 +1,45 @@
 # Job Search Assistant
 
-A lean full-stack job search assistant built for the Leena AI take-home. It pulls live job listings, scores them against a defined rubric, and lets a single user act on jobs from one dashboard.
+A lean job search assistant built for the Leena AI take-home. It pulls live public job data, ranks jobs against a saved profile, and lets one user take action from a Google Jobs-style dashboard.
 
 ## Stack
 
-- Backend: FastAPI + SQLite
-- Frontend: Next.js 14 + Tailwind CSS
-- LLM: Gemini via JSON-validated structured output
-- Integrations: Remotive, Remote OK, Jobicy, Gmail, Google Calendar
+- Frontend: Next.js 14 + Tailwind CSS, exported to Cloudflare Pages
+- Backend: Cloudflare Pages Functions
+- Database: Supabase
+- LLM: Gemini
+- Read connector: JSearch live public job API
+- Write connectors: Gmail API, Google Calendar API
 
-## Quick start
+## Production
+
+- Website: `https://job-search-vz.pages.dev`
+- Same-origin API: `/api/*`
+
+## Local quick start
 
 1. `cp .env.example .env`
-2. Fill the required API and Google OAuth values.
-3. `make setup`
-4. `make run-backend`
-5. `make run-frontend`
+2. Fill the required API values.
+3. `cd frontend`
+4. `npm install`
+5. `npm run build`
+6. `npx wrangler pages dev out --port 8788`
 
-The UI runs at `http://localhost:3000` and the API runs at `http://localhost:8000`.
+The local Cloudflare-style app runs at `http://localhost:8788`.
+
+## Required environment
+
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `JSEARCH_API_KEY`
+- `GEMINI_API_KEY`
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `GOOGLE_REDIRECT_URI`
+
+For production OAuth, the redirect URI should be:
+
+- `https://job-search-vz.pages.dev/api/auth/google/callback`
 
 ## Deliverables
 
@@ -29,8 +51,7 @@ The UI runs at `http://localhost:3000` and the API runs at `http://localhost:800
 
 ## Notes
 
-- Read-side ingestion now uses broad public job APIs rather than company-specific ATS endpoints.
-- Leena is treated as a verification point in the scored corpus, not as a dedicated source connector.
-- Google actions require a valid OAuth client configured for localhost usage.
-- The backend stores state in `backend/jobs.db`.
-- In this workspace, live ingestion was verified on April 21, 2026 against Remotive, Remote OK, and Jobicy.
+- Read-side ingestion is now centered on `JSearch` for broad company coverage, while live search still queries JSearch on demand from the search box.
+- Leena remains a verification point, not a dedicated company connector.
+- Google actions now require a valid OAuth client configured for the deployed Pages callback URL.
+- Persistent state lives in Supabase instead of the old local SQLite file.
