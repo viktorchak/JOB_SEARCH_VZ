@@ -150,6 +150,7 @@ export async function ingestAll(env: CloudflareEnv) {
     try {
       const now = new Date().toISOString();
       const changedExistingJobIds: string[] = [];
+      const newJobIds: string[] = [];
       const upsertRecords: JobRecord[] = connector.jobs.map((job) => {
         const existing = existingByKey.get(`${job.source}:${job.external_id}`);
         const record: JobRecord = {
@@ -163,6 +164,7 @@ export async function ingestAll(env: CloudflareEnv) {
         };
         if (!existing) {
           connector.inserted += 1;
+          newJobIds.push(record.id);
         } else {
           connector.updated += 1;
           if (
@@ -188,20 +190,25 @@ export async function ingestAll(env: CloudflareEnv) {
       await batchUpsertJobs(env, upsertRecords);
       await deleteDerivedForJobs(env, changedExistingJobIds);
 
-      const attributes = upsertRecords.map((job) => extractJobAttributes(job));
-      const scores = upsertRecords.map((job) => {
-        const payload = scoreJob(profile, extractJobAttributes(job));
-        return {
-          id: crypto.randomUUID(),
-          job_id: job.id,
-          rubric_version: getOptionalEnv(env, "RUBRIC_VERSION") ?? "v1",
-          ...payload,
-          scored_at: now,
-        };
-      });
+      const processIds = new Set([...newJobIds, ...changedExistingJobIds]);
+      const needsProcessing = upsertRecords.filter((job) => processIds.has(job.id));
 
-      await batchUpsertJobAttributes(env, attributes);
-      await batchUpsertScores(env, scores);
+      if (needsProcessing.length) {
+        const attributes = needsProcessing.map((job) => extractJobAttributes(job));
+        const scores = needsProcessing.map((job) => {
+          const payload = scoreJob(profile, extractJobAttributes(job));
+          return {
+            id: crypto.randomUUID(),
+            job_id: job.id,
+            rubric_version: getOptionalEnv(env, "RUBRIC_VERSION") ?? "v1",
+            ...payload,
+            scored_at: now,
+          };
+        });
+
+        await batchUpsertJobAttributes(env, attributes);
+        await batchUpsertScores(env, scores);
+      }
       await setConnectorHealth(env, connector.connector, { last_success_at: new Date().toISOString(), last_error: null });
     } catch (error) {
       await setConnectorHealth(env, connector.connector, { last_error: error instanceof Error ? error.message : "Unknown error" });
