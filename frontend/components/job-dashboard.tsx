@@ -1,6 +1,6 @@
 "use client";
 
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import { JobDetailPane } from "@/components/job-detail-pane";
 import { JobFilterToolbar } from "@/components/job-filter-toolbar";
@@ -67,12 +67,20 @@ export function JobDashboard() {
   const [sort, setSort] = useState<JobSearchFilters["sort"]>("top");
   const [tab, setTab] = useState<JobTab>("all");
 
-  const deferredQuery = useDeferredValue(query);
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setDebouncedQuery(query), 600);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [query]);
+
   const deferredLocationQuery = useDeferredValue(locationQuery);
 
   const filters = useMemo<JobSearchFilters>(
     () => ({
-      q: deferredQuery,
+      q: debouncedQuery,
       location: deferredLocationQuery,
       minScore,
       company: selectedCompany,
@@ -83,7 +91,7 @@ export function JobDashboard() {
       actionStatus: tab === "all" ? "" : tab,
       sort,
     }),
-    [datePostedDays, deferredLocationQuery, deferredQuery, minScore, remotePolicy, selectedCompany, sort, source, tab],
+    [datePostedDays, deferredLocationQuery, debouncedQuery, minScore, remotePolicy, selectedCompany, sort, source, tab],
   );
 
   useEffect(() => {

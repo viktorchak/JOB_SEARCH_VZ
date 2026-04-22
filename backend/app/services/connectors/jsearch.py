@@ -109,11 +109,21 @@ class JSearchConnector:
         jobs: list[JobIngest] = []
         seen: set[str] = set()
 
-        try:
-            items = self._search(query, num_pages=1)
-        except Exception:
-            LOGGER.exception("jsearch on-demand search failed", extra={"query": query})
-            return jobs
+        role_suffixes = [
+            "product manager OR strategy operations",
+            "chief of staff OR program manager OR business operations",
+        ]
+        queries = [f"{query} {suffix}" for suffix in role_suffixes]
+
+        all_items: list[dict] = []
+        for q in queries:
+            try:
+                all_items.extend(self._search(q, num_pages=1))
+            except Exception:
+                LOGGER.exception("jsearch on-demand search failed", extra={"query": q})
+                continue
+
+        items = all_items
 
         for item in items:
             job_id = item.get("job_id") or ""
