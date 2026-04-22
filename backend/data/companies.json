@@ -1,0 +1,23 @@
+{
+  "greenhouse": [
+    "doordash",
+    "stripe",
+    "airbnb",
+    "notion",
+    "figma",
+    "rippling",
+    "ramp",
+    "mercury",
+    "vercel",
+    "anthropic",
+    "scale",
+    "databricks"
+  ],
+  "lever": [
+    "attentive",
+    "flexport",
+    "front",
+    "netlify"
+  ]
+}
+
