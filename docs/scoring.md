@@ -8,7 +8,7 @@ We chose five scoring dimensions weighted by how strongly each signal predicts r
 
 Hard filters — location, remote policy, seniority level, years required, minimum compensation, company stage, and an option to hide jobs with unknown salary — are intentionally separated from scoring. A job that fails a hard filter is excluded from results entirely, while scoring produces a continuous ranking among jobs that pass. This separation prevents a single disqualifying attribute (like onsite-only for a remote-only searcher) from merely lowering a score when it should eliminate the result.
 
-We excluded LLM-based scoring from the ranking hot path. An earlier version sent every job to Gemini for a scored evaluation, but this made re-ranking on profile change expensive and non-deterministic — the same job could score differently on consecutive calls. Instead, Gemini is reserved for one-time attribute extraction (planned upgrade from the current heuristic extractor) and for drafting referral emails, where variability is acceptable. We also excluded contract/staffing roles and titles that match noise keywords (e.g., warehouse associate, delivery driver) at the ingestion layer so they never enter the scored corpus. Postings older than 30 days are filterable but not excluded by default, since some niche roles stay open longer.
+We exclude LLM-based scoring from the ranking path. The live system uses deterministic scoring from cached job attributes and an active user profile, which makes profile changes fast, repeatable, and explainable. Gemini is used for referral-email drafting, while attribute extraction is heuristic and deterministic. We also exclude broad, obviously irrelevant roles from the scored corpus by using a positive role-family matcher at ingestion. In practice, the system keeps roles that look like supported families (product, strategy/ops, engineering, program management, business operations, partnerships, analytics, design, sales/GTM, and non-technical business functions) and drops listings that do not match any supported family at all. Postings older than 30 days are filterable but not excluded by default, since some niche roles stay open longer.
 
 ---
 
@@ -73,4 +73,4 @@ Job attributes are extracted once per job and cached. The current implementation
 - **Company stage**: public company name list + keyword detection in description
 - **Learning / ownership signals**: keyword hit count (0–10 scale)
 
-A planned upgrade replaces heuristic extraction with a single Gemini call per job for higher accuracy on ambiguous titles and implicit seniority.
+The live implementation uses heuristic extraction rather than an LLM extractor.
