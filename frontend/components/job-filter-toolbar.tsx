@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { ShieldCheck, SlidersHorizontal, X } from "lucide-react";
+import { SlidersHorizontal, X } from "lucide-react";
 
-import type { ActionStatus, CompanyStage, JobListResponse, ProfileSeniority, RemotePolicy } from "@/lib/api";
+import type { ActionStatus, CompanyStage, ProfileSeniority, RemotePolicy } from "@/lib/api";
 
 interface JobFilterToolbarProps {
   location: string;
@@ -12,7 +12,6 @@ interface JobFilterToolbarProps {
   minScore: number;
   sort: "top" | "relevance" | "newest" | "recent";
   tab: "all" | Extract<ActionStatus, "saved" | "applied" | "dismissed">;
-  verification: JobListResponse["verification"] | null;
   maxYearsRequired: number | null;
   minCompensation: number | null;
   seniorityLevel: ProfileSeniority | "";
@@ -64,7 +63,6 @@ export function JobFilterToolbar({
   minScore,
   sort,
   tab,
-  verification,
   maxYearsRequired,
   minCompensation,
   seniorityLevel,
@@ -105,23 +103,7 @@ export function JobFilterToolbar({
   return (
     <div className="space-y-4">
       <section className="rounded-[32px] border border-black/10 bg-white/80 p-5 backdrop-blur">
-        <div className="rounded-[24px] border border-black/10 bg-[#f7f4ee] px-4 py-3">
-          <div className="flex flex-wrap items-start gap-3">
-            <div className="rounded-full bg-white p-2 text-teal-800">
-              <ShieldCheck className="h-4 w-4" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="font-ui text-sm font-semibold text-slate-900">Leena verification</p>
-              <p className="font-ui mt-1 text-sm leading-6 text-slate-700">
-                {verification?.leena_eir_present
-                  ? `A Leena-related role is present in the scored corpus from ${verification.matched_source}.`
-                  : "No Leena match is present in the current scored corpus from the public API feeds."}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-4 flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <FilterSelect
             label="Date posted"
             value={datePostedDays ? String(datePostedDays) : ""}

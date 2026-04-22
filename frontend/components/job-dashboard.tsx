@@ -68,7 +68,6 @@ export function JobDashboard() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [dismissReason, setDismissReason] = useState(DISMISS_DEFAULT);
   const [emailForm, setEmailForm] = useState({ to_email: "", subject: "", body: "" });
-  const [verification, setVerification] = useState<JobListResponse["verification"] | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   const [query, setQuery] = useState("");
@@ -168,7 +167,6 @@ export function JobDashboard() {
       const response = await api.getJobs(nextFilters);
       setJobs(response.items);
       setTotal(response.total);
-      setVerification(response.verification);
       setProfile(response.profile);
       setProfileDraft((current) =>
         current === DEFAULT_PROFILE && !profile ? profileToDraft(response.profile) : current,
@@ -400,7 +398,6 @@ export function JobDashboard() {
                 minScore={minScore}
                 sort={sort}
                 tab={tab}
-                verification={verification}
                 maxYearsRequired={maxYearsRequired}
                 minCompensation={minCompensation}
                 seniorityLevel={seniorityFilter}
