@@ -57,9 +57,6 @@ export function JobSearchHeader({
     <header className="space-y-5 border-b border-black/10 pb-6">
       <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-start">
         <div className="space-y-3">
-          <p className="font-ui text-xs uppercase tracking-[0.38em] text-slate-500">
-            Leena AI take-home
-          </p>
           <div>
             <h1 className="font-display text-3xl font-semibold tracking-tight text-slate-950 md:text-5xl">
               Job Search Assistant
